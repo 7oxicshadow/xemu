@@ -75,6 +75,74 @@ float g_main_menu_height;
 float g_ui_scale = 1.0;
 bool g_trigger_style_update = true;
 
+class FPSManager
+{
+private:
+    bool active;
+
+public:
+
+    FPSManager()
+    {
+        active = true;
+    }
+
+    ~FPSManager()
+    {
+
+    }
+
+    void Draw()
+    {
+        if(active)
+        {
+            DrawFPS();
+        }
+    }
+
+private:
+    void DrawFPS()
+    {
+        const float DISTANCE = 10.0f;
+        static int corner = 0;
+        ImGuiIO& io = ImGui::GetIO();
+        if (corner != -1)
+        {
+            ImVec2 window_pos = ImVec2((corner & 1) ? io.DisplaySize.x - DISTANCE : DISTANCE, (corner & 2) ? io.DisplaySize.y - DISTANCE : DISTANCE);
+            window_pos.y = g_main_menu_height + DISTANCE;
+            ImVec2 window_pos_pivot = ImVec2((corner & 1) ? 1.0f : 0.0f, (corner & 2) ? 1.0f : 0.0f);
+            ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
+        }
+
+        float fade = 1.0;
+
+        ImVec4 color = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+        color.w *= fade;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0,0,0,fade*0.9f));
+        ImGui::PushStyleColor(ImGuiCol_Border, color);
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::SetNextWindowBgAlpha(0.90f * fade);
+        if (ImGui::Begin("FPSOverlay", NULL,
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoNav |
+            ImGuiWindowFlags_NoInputs
+            ))
+        {
+            ImGui::Text("FPS %d", g_nv2a_stats.increment_fps);
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopStyleColor();
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        ImGui::End();
+    }
+};
+
 class NotificationManager
 {
 private:
@@ -555,6 +623,97 @@ public:
         }
 
         ImGui::Columns(1);
+
+        static bool rumble_switch;
+        static bool ana_dig_setting;
+        static bool init = false;
+
+        if (!init){
+            int tmpint;
+            xemu_settings_get_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, &tmpint);
+            rumble_switch = (bool)tmpint;
+
+            xemu_settings_get_bool(XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH, &tmpint);
+            ana_dig_setting = (bool)tmpint;
+
+            init = true;
+        }
+
+        if(bound_state)
+        {
+
+
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            if (ImGui::Checkbox("Global Disable Rumble", &rumble_switch)) {
+                xemu_settings_set_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, rumble_switch);
+                xemu_settings_save();
+            }
+            ImGui::NextColumn();
+
+            ImGui::NextColumn();
+            ImGui::PushItemWidth(170*g_ui_scale);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            if (ImGui::Checkbox("Enable Analog Btns", &ana_dig_setting)) {
+                xemu_settings_set_bool(XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH, ana_dig_setting);
+                xemu_settings_save();
+            }
+            ImGui::PopItemWidth();
+
+            if(ana_dig_setting)
+            {
+                ImGui::SameLine();
+                ImGui::SetCursorPosX((170+10)*g_ui_scale);
+                
+                ImGui::PushItemWidth(85*g_ui_scale);
+                static int ana_dig_tpf = 0;
+                xemu_settings_get_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, &ana_dig_tpf);
+                if (ImGui::SliderInt("Ticks", &ana_dig_tpf, 0, 20, 0, ImGuiSliderFlags_ClampOnInput)){
+                    xemu_settings_set_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, ana_dig_tpf);
+                    xemu_settings_save();
+                }
+                ImGui::PopItemWidth();
+            }
+            ImGui::NextColumn();
+
+
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            /*const char* items[] = { "0", "5", "10", "15", "20", "25", "30", "35", "40", "45", "50", 
+                                    "55", "60", "65", "70", "75", "80", "85", "90", "95", "100" };*/
+            
+            static int lstick_deadzone = 0;
+            static int rstick_deadzone = 0;
+            static int stick_offset = 0;
+
+
+            //printf("%d\n", bound_state->bound);
+            xemu_settings_get_int(deadzone_map[bound_state->bound].lstick, &lstick_deadzone);
+            xemu_settings_get_int(deadzone_map[bound_state->bound].rstick, &rstick_deadzone);
+            xemu_settings_get_int(stick_offset_map[bound_state->bound], &stick_offset);
+
+
+            //if (ImGui::Combo("LStick Deadzone", &lstick_deadzone, items, IM_ARRAYSIZE(items))) {
+            if (ImGui::SliderInt("LStick Deadzone (%)", &lstick_deadzone, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
+                xemu_settings_set_int(deadzone_map[bound_state->bound].lstick, lstick_deadzone);
+                xemu_settings_save();
+            }
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
+            if (ImGui::SliderInt("RStick Deadzone (%)", &rstick_deadzone, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
+                xemu_settings_set_int(deadzone_map[bound_state->bound].rstick, rstick_deadzone);
+                xemu_settings_save();
+            }
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
+            if (ImGui::SliderInt("Stick Start Offset (0 - 32767)", &stick_offset, 0, 32767, 0, ImGuiSliderFlags_ClampOnInput)){
+                xemu_settings_set_int(stick_offset_map[bound_state->bound], stick_offset);
+                xemu_settings_save();
+            }
+
+        }
 
         //
         // Add a separator between input selection and controller graphic
@@ -1897,6 +2056,7 @@ static NotificationManager notification_manager;
 static AutoUpdateWindow update_window;
 #endif
 static std::deque<const char *> g_errors;
+static FPSManager fps_manager;
 
 class FirstBootWindow
 {
@@ -2119,7 +2279,7 @@ static void ShowMainMenu()
             }
 
             if (ImGui::Combo(
-                    "Scaling Mode", &scaling_mode, "Center\0Scale\0Scale (Widescreen 16:9)\0Scale (4:3)\0Stretch\0")) {
+                    "Scaling Mode", &scaling_mode, "Center\0Scale\0Scale (Widescreen 16:9)\0Scale (4:3)\0Scale (Custom)\0Stretch\0")) {
                 xemu_settings_set_enum(XEMU_SETTINGS_DISPLAY_SCALE, scaling_mode);
                 xemu_settings_save();
             }
@@ -2348,12 +2508,18 @@ void xemu_hud_render(void)
         menu_button = true;
     }
 
+#if(0)
     // If the mouse is moved, wake the ui
     static ImVec2 last_mouse_pos = ImVec2();
     ImVec2 current_mouse_pos = ImGui::GetMousePos();
     if ((current_mouse_pos.x != last_mouse_pos.x) ||
         (current_mouse_pos.y != last_mouse_pos.y)) {
         last_mouse_pos = current_mouse_pos;
+        ui_wakeup = true;
+    }
+#endif
+
+   if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)){
         ui_wakeup = true;
     }
 
@@ -2413,6 +2579,13 @@ void xemu_hud_render(void)
     ImGui::NewFrame();
     process_keyboard_shortcuts();
 
+    int ui_show_fps_bool;
+    xemu_settings_get_bool(XEMU_SETTINGS_DISPLAY_SHOW_FPS, &ui_show_fps_bool);
+    if(ui_show_fps_bool) {
+    	// Draw the FPS before the menu
+    	fps_manager.Draw();
+    }
+
     bool show_main_menu = true;
 
     if (first_boot_window.is_open) {
@@ -2420,11 +2593,13 @@ void xemu_hud_render(void)
     }
 
     if (show_main_menu) {
-        // Auto-hide main menu after 5s of inactivity
-        static uint32_t last_check = 0;
+        // Auto-hide main menu after 1s of inactivity
+        #define TIMEOUT (1000)
+        //initialise this to -timeout to stop the menu from showing at startup
+        static int32_t last_check = -TIMEOUT;
         float alpha = 1.0;
-        const uint32_t timeout = 5000;
-        const float fade_duration = 1000.0;
+        const uint32_t timeout = TIMEOUT;
+        const float fade_duration = 500.0;
         if (ui_wakeup) {
             last_check = now;
         }

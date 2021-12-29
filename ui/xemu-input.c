@@ -313,6 +313,8 @@ void xemu_input_update_sdl_kbd_controller_state(ControllerState *state)
 
 void xemu_input_update_sdl_controller_state(ControllerState *state)
 {
+    int temp = 0;
+
     state->buttons = 0;
     memset(state->axis, 0, sizeof(state->axis));
 
@@ -334,8 +336,47 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
         SDL_CONTROLLER_BUTTON_GUIDE
     };
 
+    static uint8_t local_buttonana_a[6] = {0U, 0U, 0U, 0U, 0U, 0U};
+    uint8_t y = 0U;
+    //#define BUTTON_INC_STEP    (5U)
+
     for (int i = 0; i < 15; i++) {
-        state->buttons |= SDL_GameControllerGetButton(state->sdl_gamecontroller, sdl_button_map[i]) << i;
+        uint8_t buttonstate = SDL_GameControllerGetButton(state->sdl_gamecontroller, sdl_button_map[i]);
+
+        state->buttons |= buttonstate << i;
+
+        if( (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_A) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_B) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_X) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_Y) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) )
+        {
+
+            //printf("%d %d\n", buttonstate, local_buttonana_a[y]);
+
+            /* Hack to fix backward mapping */
+            if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+                y = 5;
+
+            if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
+                y = 4;
+
+            xemu_settings_get_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, &temp);
+
+            if((local_buttonana_a[y] < 0xFF) && buttonstate)
+                if((local_buttonana_a[y] + temp) < 255U)
+                    local_buttonana_a[y] += temp;
+                else
+                    local_buttonana_a[y] = 255U;
+            else
+                if(buttonstate == 0U)
+                    local_buttonana_a[y] = 0U;
+
+            state->button_ana[y] = local_buttonana_a[y];
+
+            y++;
+        }
     }
 
     const SDL_GameControllerAxis sdl_axis_map[6] = {
@@ -354,11 +395,87 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
     // FIXME: Check range
     state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
     state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+
+    #define MAX_INPUT_RANGE    (32767)
+
+    int JOYSTICK_LEFT_DEAD_ZONE = 0;
+    int JOYSTICK_RIGHT_DEAD_ZONE = 0;
+
+    if (state->bound >= 0){
+
+        temp = 0;
+
+        xemu_settings_get_int(deadzone_map[state->bound].lstick, &temp);
+        JOYSTICK_LEFT_DEAD_ZONE = (temp * MAX_INPUT_RANGE) / 100;
+        xemu_settings_get_int(deadzone_map[state->bound].rstick, &temp);
+        JOYSTICK_RIGHT_DEAD_ZONE = (temp * MAX_INPUT_RANGE) / 100;
+
+        //printf("%d\n", JOYSTICK_LEFT_DEAD_ZONE);
+
+        if ((state->axis[CONTROLLER_AXIS_LSTICK_X] > -JOYSTICK_LEFT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_LSTICK_X] < JOYSTICK_LEFT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_LSTICK_X] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_LSTICK_Y] > -JOYSTICK_LEFT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_LSTICK_Y] < JOYSTICK_LEFT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_LSTICK_Y] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_RSTICK_X] > -JOYSTICK_RIGHT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_RSTICK_X] < JOYSTICK_RIGHT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_RSTICK_X] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_RSTICK_Y] > -JOYSTICK_RIGHT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_RSTICK_Y] < JOYSTICK_RIGHT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_RSTICK_Y] = 0;
+        }
+    }
+
+    //#define OFFSET    (10000)
+    int joy_offset;
+    xemu_settings_get_int(XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_1, &joy_offset);
+
+    int lstickx = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_X], joy_offset, MAX_INPUT_RANGE );
+    int lsticky = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_Y], joy_offset, MAX_INPUT_RANGE );
+    int rstickx = calculate_range_output(state->axis[CONTROLLER_AXIS_RSTICK_X], joy_offset, MAX_INPUT_RANGE );
+    int rsticky = calculate_range_output(state->axis[CONTROLLER_AXIS_RSTICK_Y], joy_offset, MAX_INPUT_RANGE );
+
+    state->axis[CONTROLLER_AXIS_LSTICK_X] = lstickx;
+    state->axis[CONTROLLER_AXIS_LSTICK_Y] = lsticky;
+    state->axis[CONTROLLER_AXIS_RSTICK_X] = rstickx;
+    state->axis[CONTROLLER_AXIS_RSTICK_Y] = rsticky;
+
+    //printf("%d    %d    %d    %d\n",lstickx, lsticky, rstickx, rsticky);
+}
+
+int calculate_range_output(int input, int start, int stop)
+{
+    int output = 0;
+    int range = 0;
+
+    if(input != 0)
+    {
+        range = stop - start;
+
+        if(input > 0)
+            output = (int)(((float)input / (float)32767) * range) + start;
+        else
+            output = (int)(((float)input / (float)32767) * range) - start;
+
+        if (output > 32767) output = 32767;
+        else if (output < -32767) output = -32767;
+        else
+        {
+            /* do nothing */
+        }
+    }
+
+    return output;
 }
 
 void xemu_input_update_rumble(ControllerState *state)
 {
-    if (state->sdl_haptic == NULL) {
+
+    int rumble_setting = false;
+
+    xemu_settings_get_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, &rumble_setting);
+
+    if ((state->sdl_haptic == NULL) || (rumble_setting == true)) {
         // Haptic not supported for this joystick
         return;
     }

@@ -71,6 +71,7 @@ typedef struct ControllerState {
 
     // Input state
     uint16_t buttons;
+    uint8_t button_ana[6];
     int16_t  axis[CONTROLLER_AXIS__COUNT];
 
     // Rendering state hacked on here for convenience but needs to be moved (FIXME)

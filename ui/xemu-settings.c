@@ -55,12 +55,31 @@ struct xemu_settings {
 	int scale;
 	int ui_scale;
 	int render_scale;
+	int win_width;
+	int win_height;
+	int ui_show_fps; // Boolean
+	char *custom_ratio;
 
 	// [input]
 	char *controller_1_guid;
 	char *controller_2_guid;
 	char *controller_3_guid;
 	char *controller_4_guid;
+	int controller_1_lsdz;
+	int controller_1_rsdz;
+	int controller_2_lsdz;
+	int controller_2_rsdz;
+	int controller_3_lsdz;
+	int controller_3_rsdz;
+	int controller_4_lsdz;
+	int controller_4_rsdz;
+	int disable_rumble; //Boolean
+	int ana_dig_switch; //Boolean
+	int ana_button_tpf;
+	int joy_start_offset_ctrl_1;
+	int joy_start_offset_ctrl_2;
+	int joy_start_offset_ctrl_3;
+	int joy_start_offset_ctrl_4;
 
 	// [network]
 	int   net_enabled; // Boolean
@@ -74,6 +93,22 @@ struct xemu_settings {
 	int check_for_update; // Boolean
 };
 
+const struct deadzone_str_map deadzone_map[5] = {
+	{ XEMU_SETTINGS_INPUT_CONTROLLER_1_LSDZ, XEMU_SETTINGS_INPUT_CONTROLLER_1_RSDZ },
+	{ XEMU_SETTINGS_INPUT_CONTROLLER_2_LSDZ, XEMU_SETTINGS_INPUT_CONTROLLER_2_RSDZ },
+	{ XEMU_SETTINGS_INPUT_CONTROLLER_3_LSDZ, XEMU_SETTINGS_INPUT_CONTROLLER_3_RSDZ },
+	{ XEMU_SETTINGS_INPUT_CONTROLLER_4_LSDZ, XEMU_SETTINGS_INPUT_CONTROLLER_4_RSDZ },
+	{ XEMU_SETTINGS_INVALID, XEMU_SETTINGS_INVALID },
+};
+
+const enum xemu_settings_keys stick_offset_map[5] = {
+    XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_1,
+    XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_2,
+    XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_3,
+    XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_4,
+	XEMU_SETTINGS_INVALID,
+};
+
 struct enum_str_map {
 	int         value;
 	const char *str;
@@ -84,6 +119,7 @@ static const struct enum_str_map display_scale_map[DISPLAY_SCALE__COUNT+1] = {
 	{ DISPLAY_SCALE_SCALE,   "scale"   },
 	{ DISPLAY_SCALE_WS169,   "scale_ws169" },
 	{ DISPLAY_SCALE_FS43,    "scale_fs43" },
+	{ DISPLAY_SCALE_CUSTOM,  "scale_custom" },
 	{ DISPLAY_SCALE_STRETCH, "stretch" },
 	{ 0,                     NULL      },
 };
@@ -122,11 +158,30 @@ struct config_offset_table {
 	[XEMU_SETTINGS_DISPLAY_SCALE]        = { CONFIG_TYPE_ENUM, "display", "scale",        offsetof(struct xemu_settings, scale),        { .default_int = DISPLAY_SCALE_SCALE }, display_scale_map },
 	[XEMU_SETTINGS_DISPLAY_UI_SCALE]     = { CONFIG_TYPE_INT,  "display", "ui_scale",     offsetof(struct xemu_settings, ui_scale),     { .default_int = 1                   }                    },
 	[XEMU_SETTINGS_DISPLAY_RENDER_SCALE] = { CONFIG_TYPE_INT,  "display", "render_scale", offsetof(struct xemu_settings, render_scale), { .default_int = 1                   }                    },
+	[XEMU_SETTINGS_DISPLAY_WIN_WIDTH]    = { CONFIG_TYPE_INT,  "display", "win_width",    offsetof(struct xemu_settings, win_width),    { .default_int = 1024                }                    },
+	[XEMU_SETTINGS_DISPLAY_WIN_HEIGHT]   = { CONFIG_TYPE_INT,  "display", "win_height",   offsetof(struct xemu_settings, win_height),   { .default_int = 768                 }                    },
+	[XEMU_SETTINGS_DISPLAY_SHOW_FPS]     = { CONFIG_TYPE_BOOL,  "display", "ui_show_fps", offsetof(struct xemu_settings, ui_show_fps),  { .default_bool = 0                  }                    },
+	[XEMU_SETTINGS_DISPLAY_CUSTOM_RATIO] = { CONFIG_TYPE_STRING, "display", "custom_ratio",   offsetof(struct xemu_settings, custom_ratio),      { .default_str  = "1.33333333" } },
 
 	[XEMU_SETTINGS_INPUT_CONTROLLER_1_GUID] = { CONFIG_TYPE_STRING,   "input", "controller_1_guid", offsetof(struct xemu_settings, controller_1_guid), { .default_str = "" } },
 	[XEMU_SETTINGS_INPUT_CONTROLLER_2_GUID] = { CONFIG_TYPE_STRING,   "input", "controller_2_guid", offsetof(struct xemu_settings, controller_2_guid), { .default_str = "" } },
 	[XEMU_SETTINGS_INPUT_CONTROLLER_3_GUID] = { CONFIG_TYPE_STRING,   "input", "controller_3_guid", offsetof(struct xemu_settings, controller_3_guid), { .default_str = "" } },
 	[XEMU_SETTINGS_INPUT_CONTROLLER_4_GUID] = { CONFIG_TYPE_STRING,   "input", "controller_4_guid", offsetof(struct xemu_settings, controller_4_guid), { .default_str = "" } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_1_LSDZ] = { CONFIG_TYPE_INT,   "input", "controller_1_lsdz", offsetof(struct xemu_settings, controller_1_lsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_1_RSDZ] = { CONFIG_TYPE_INT,   "input", "controller_1_rsdz", offsetof(struct xemu_settings, controller_1_rsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_2_LSDZ] = { CONFIG_TYPE_INT,   "input", "controller_2_lsdz", offsetof(struct xemu_settings, controller_2_lsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_2_RSDZ] = { CONFIG_TYPE_INT,   "input", "controller_2_rsdz", offsetof(struct xemu_settings, controller_2_rsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_3_LSDZ] = { CONFIG_TYPE_INT,   "input", "controller_3_lsdz", offsetof(struct xemu_settings, controller_3_lsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_3_RSDZ] = { CONFIG_TYPE_INT,   "input", "controller_3_rsdz", offsetof(struct xemu_settings, controller_3_rsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_4_LSDZ] = { CONFIG_TYPE_INT,   "input", "controller_4_lsdz", offsetof(struct xemu_settings, controller_4_lsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_CONTROLLER_4_RSDZ] = { CONFIG_TYPE_INT,   "input", "controller_4_rsdz", offsetof(struct xemu_settings, controller_4_rsdz), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_DISABLE_RUMBLE] = { CONFIG_TYPE_BOOL,  "input", "disable_rumble", offsetof(struct xemu_settings, disable_rumble), { .default_bool = 0 } },
+	[XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH] = { CONFIG_TYPE_BOOL,  "input", "ana_dig_switch", offsetof(struct xemu_settings, ana_dig_switch), { .default_bool = 0 } },
+	[XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF] = { CONFIG_TYPE_INT,   "input", "ana_button_tpf", offsetof(struct xemu_settings, ana_button_tpf), { .default_int  = 5 } },
+	[XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_1] = { CONFIG_TYPE_INT,   "input", "joy_start_offset_ctrl_1", offsetof(struct xemu_settings, joy_start_offset_ctrl_1), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_2] = { CONFIG_TYPE_INT,   "input", "joy_start_offset_ctrl_2", offsetof(struct xemu_settings, joy_start_offset_ctrl_2), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_3] = { CONFIG_TYPE_INT,   "input", "joy_start_offset_ctrl_3", offsetof(struct xemu_settings, joy_start_offset_ctrl_3), { .default_int  = 0 } },
+	[XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_4] = { CONFIG_TYPE_INT,   "input", "joy_start_offset_ctrl_4", offsetof(struct xemu_settings, joy_start_offset_ctrl_4), { .default_int  = 0 } },
 
 	[XEMU_SETTINGS_NETWORK_ENABLED]     = { CONFIG_TYPE_BOOL,   "network", "enabled",     offsetof(struct xemu_settings, net_enabled),     { .default_bool = 0              } },
 	[XEMU_SETTINGS_NETWORK_BACKEND]     = { CONFIG_TYPE_ENUM,   "network", "backend",     offsetof(struct xemu_settings, net_backend),     { .default_int = XEMU_NET_BACKEND_USER }, net_backend_map },
