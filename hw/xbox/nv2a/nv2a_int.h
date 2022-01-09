@@ -397,7 +397,6 @@ typedef struct PGRAPHState {
 
     unsigned int surface_scale_factor;
     uint8_t *scale_buf;
-    bool clearing;
 } PGRAPHState;
 
 typedef struct NV2AState {
