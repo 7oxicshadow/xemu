@@ -653,6 +653,8 @@ void pgraph_flush(NV2AState *d)
 #define METHOD_ADDR(gclass, name) \
     gclass ## _ ## name
 #define METHOD_ADDR_TO_INDEX(x) ((x)>>2)
+#define METHOD_NAME_STR(gclass, name) \
+    tostring(gclass ## _ ## name)
 #define METHOD_FUNC_NAME(gclass, name) \
     pgraph_ ## gclass ## _ ## name ## _handler
 #define METHOD_HANDLER_ARGS \
@@ -677,23 +679,44 @@ void pgraph_flush(NV2AState *d)
 #undef DEF_METHOD_CASE_4
 
 typedef void (*MethodFunc)(METHOD_HANDLER_ARGS);
-static const MethodFunc pgraph_kelvin_method_handlers[0x800] = {
+static const struct {
+    MethodFunc handler;
+    const char *name;
+} pgraph_kelvin_methods[0x800] = {
 #define DEF_METHOD(gclass, name)                        \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name))] = \
-        METHOD_FUNC_NAME(gclass, name),
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    },
 #define DEF_METHOD_RANGE(gclass, name, range) \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name)) \
      ... METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name) + range)] = \
-        &METHOD_FUNC_NAME(gclass, name),
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    },
 #define DEF_METHOD_CASE_4_OFFSET(gclass, name, offset, stride) \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name) + offset)] = \
-        &METHOD_FUNC_NAME(gclass, name), \
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    }, \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name) + offset + stride)] = \
-        &METHOD_FUNC_NAME(gclass, name), \
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    }, \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name) + offset + stride * 2)] = \
-        &METHOD_FUNC_NAME(gclass, name), \
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    }, \
     [METHOD_ADDR_TO_INDEX(METHOD_ADDR(gclass, name) + offset + stride * 3)] = \
-        &METHOD_FUNC_NAME(gclass, name),
+    { \
+        METHOD_FUNC_NAME(gclass, name), \
+        METHOD_NAME_STR(gclass, name) \
+    },
 #define DEF_METHOD_CASE_4(gclass, name, stride) \
     DEF_METHOD_CASE_4_OFFSET(gclass, name, 0, stride)
 #include "pgraph_methods.h"
@@ -743,6 +766,151 @@ static const MethodFunc pgraph_kelvin_method_handlers[0x800] = {
     } \
     *num_words_consumed = param_iter;
 
+// TODO: Optimize. Ideally this should all be done via OpenGL.
+static void pgraph_image_blit(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    ContextSurfaces2DState *context_surfaces = &pg->context_surfaces_2d;
+    ImageBlitState *image_blit = &pg->image_blit;
+    BetaState *beta = &pg->beta;
+
+    pgraph_update_surface(d, false, true, true);
+
+    assert(context_surfaces->object_instance == image_blit->context_surfaces);
+
+    unsigned int bytes_per_pixel;
+    switch (context_surfaces->color_format) {
+        case NV062_SET_COLOR_FORMAT_LE_Y8:
+            bytes_per_pixel = 1;
+            break;
+        case NV062_SET_COLOR_FORMAT_LE_R5G6B5:
+            bytes_per_pixel = 2;
+            break;
+        case NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:
+        case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
+        case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8:
+        case NV062_SET_COLOR_FORMAT_LE_Y32:
+            bytes_per_pixel = 4;
+            break;
+        default:
+            fprintf(stderr, "Unknown blit surface format: 0x%x\n",
+                    context_surfaces->color_format);
+            assert(false);
+            break;
+    }
+
+    hwaddr source_dma_len, dest_dma_len;
+
+    uint8_t *source = (uint8_t *)nv_dma_map(
+        d, context_surfaces->dma_image_source, &source_dma_len);
+    assert(context_surfaces->source_offset < source_dma_len);
+    source += context_surfaces->source_offset;
+
+    uint8_t *dest = (uint8_t *)nv_dma_map(d, context_surfaces->dma_image_dest,
+                                          &dest_dma_len);
+    assert(context_surfaces->dest_offset < dest_dma_len);
+    dest += context_surfaces->dest_offset;
+
+    hwaddr source_addr = source - d->vram_ptr;
+    hwaddr dest_addr = dest - d->vram_ptr;
+
+    SurfaceBinding *surf_src = pgraph_surface_get(d, source_addr);
+    if (surf_src) {
+        pgraph_download_surface_data_if_dirty(d, surf_src);
+    }
+
+    SurfaceBinding *surf_dest = pgraph_surface_get(d, dest_addr);
+    if (surf_dest) {
+        if (image_blit->height < surf_dest->height ||
+            image_blit->width < surf_dest->width) {
+            pgraph_download_surface_data_if_dirty(d, surf_dest);
+        }
+        surf_dest->upload_pending = true;
+    }
+
+    hwaddr source_offset = image_blit->in_y * context_surfaces->source_pitch +
+                           image_blit->in_x * bytes_per_pixel;
+    hwaddr dest_offset = image_blit->out_y * context_surfaces->dest_pitch +
+                         image_blit->out_x * bytes_per_pixel;
+
+    hwaddr source_size =
+        (image_blit->height - 1) * context_surfaces->source_pitch +
+        image_blit->width * bytes_per_pixel;
+    hwaddr dest_size = (image_blit->height - 1) * context_surfaces->dest_pitch +
+                       image_blit->width * bytes_per_pixel;
+
+    /* FIXME: What does hardware do in this case? */
+    assert(source_addr + source_offset + source_size <=
+           memory_region_size(d->vram));
+    assert(dest_addr + dest_offset + dest_size <= memory_region_size(d->vram));
+
+    uint8_t *source_row = source + source_offset;
+    uint8_t *dest_row = dest + dest_offset;
+
+    if (image_blit->operation == NV09F_SET_OPERATION_SRCCOPY) {
+        NV2A_GL_DPRINTF(true, "NV09F_SET_OPERATION_SRCCOPY");
+        for (unsigned int y = 0; y < image_blit->height; y++) {
+            memmove(dest_row, source_row, image_blit->width * bytes_per_pixel);
+            source_row += context_surfaces->source_pitch;
+            dest_row += context_surfaces->dest_pitch;
+        }
+    } else if (image_blit->operation == NV09F_SET_OPERATION_BLEND_AND) {
+        NV2A_GL_DPRINTF(true, "NV09F_SET_OPERATION_BLEND_AND");
+        uint32_t max_beta_mult = 0x7f80;
+        uint32_t beta_mult = beta->beta >> 16;
+        uint32_t inv_beta_mult = max_beta_mult - beta_mult;
+        for (unsigned int y = 0; y < image_blit->height; y++) {
+            for (unsigned int x = 0; x < image_blit->width; x++) {
+                for (unsigned int ch = 0; ch < 3; ch++) {
+                    uint32_t a = source_row[x * 4 + ch] * beta_mult;
+                    uint32_t b = dest_row[x * 4 + ch] * inv_beta_mult;
+                    dest_row[x * 4 + ch] = (a + b) / max_beta_mult;
+                }
+            }
+            source_row += context_surfaces->source_pitch;
+            dest_row += context_surfaces->dest_pitch;
+        }
+    } else {
+        fprintf(stderr, "Unknown blit operation: 0x%x\n",
+                image_blit->operation);
+        assert(false && "Unknown blit operation");
+    }
+
+    NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source_addr, dest_addr);
+
+    bool needs_alpha_patching;
+    uint8_t alpha_override;
+    switch (context_surfaces->color_format) {
+    case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
+        needs_alpha_patching = true;
+        alpha_override = 0xff;
+        break;
+    case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8:
+        needs_alpha_patching = true;
+        alpha_override = 0;
+        break;
+    default:
+        needs_alpha_patching = false;
+        alpha_override = 0;
+    }
+
+    if (needs_alpha_patching) {
+        dest_row = dest + dest_offset;
+        for (unsigned int y = 0; y < image_blit->height; y++) {
+            for (unsigned int x = 0; x < image_blit->width; x++) {
+                dest_row[x * 4 + 3] = alpha_override;
+            }
+            dest_row += context_surfaces->dest_pitch;
+        }
+    }
+
+    dest_addr += dest_offset;
+    memory_region_set_client_dirty(d->vram, dest_addr, dest_size,
+                                   DIRTY_MEMORY_VGA);
+    memory_region_set_client_dirty(d->vram, dest_addr, dest_size,
+                                   DIRTY_MEMORY_NV2A_TEX);
+}
+
 int pgraph_method(NV2AState *d, unsigned int subchannel,
                    unsigned int method, uint32_t parameter,
                    uint32_t *parameters, size_t num_words_available,
@@ -760,6 +928,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
     ContextSurfaces2DState *context_surfaces_2d = &pg->context_surfaces_2d;
     ImageBlitState *image_blit = &pg->image_blit;
+    BetaState *beta = &pg->beta;
 
     assert(subchannel < 8);
 
@@ -800,6 +969,23 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
     /* ugly switch for now */
     switch (graphics_class) {
+
+    case NV_BETA: { switch (method) {
+    case NV012_SET_OBJECT:
+        beta->object_instance = parameter;
+        break;
+
+    case NV012_SET_BETA:
+        if (parameter & 0x80000000) {
+            beta->beta = 0;
+        } else {
+            // The parameter is a signed fixed-point number with a sign bit and
+            // 31 fractional bits. Note that negative values are clamped to 0,
+            // and only 8 fractional bits are actually implemented in hardware.
+            beta->beta = parameter & 0x7f800000;
+        }
+        break;
+    } break; }
 
     case NV_CONTEXT_PATTERN: { switch (method) {
     case NV044_SET_MONOCHROME_COLOR0:
@@ -856,103 +1042,15 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         image_blit->width = parameter & 0xFFFF;
         image_blit->height = parameter >> 16;
 
-        /* I guess this kicks it off? */
-        if (image_blit->operation == NV09F_SET_OPERATION_SRCCOPY) {
-
-            NV2A_GL_DPRINTF(true, "NV09F_SET_OPERATION_SRCCOPY");
-
-            pgraph_update_surface(d, false, true, true);
-
-            ContextSurfaces2DState *context_surfaces = context_surfaces_2d;
-            assert(context_surfaces->object_instance
-                    == image_blit->context_surfaces);
-
-            unsigned int bytes_per_pixel;
-            switch (context_surfaces->color_format) {
-            case NV062_SET_COLOR_FORMAT_LE_Y8:
-                bytes_per_pixel = 1;
-                break;
-            case NV062_SET_COLOR_FORMAT_LE_R5G6B5:
-                bytes_per_pixel = 2;
-                break;
-            case NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:
-            case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
-            case NV062_SET_COLOR_FORMAT_LE_Y32:
-                bytes_per_pixel = 4;
-                break;
-            default:
-                fprintf(stderr, "Unknown blit surface format: 0x%x\n", context_surfaces->color_format);
-                assert(false);
-                break;
-            }
-
-            hwaddr source_dma_len, dest_dma_len;
-            uint8_t *source, *dest;
-
-            source = (uint8_t*)nv_dma_map(d, context_surfaces->dma_image_source,
-                                          &source_dma_len);
-            assert(context_surfaces->source_offset < source_dma_len);
-            source += context_surfaces->source_offset;
-
-            dest = (uint8_t*)nv_dma_map(d, context_surfaces->dma_image_dest,
-                                        &dest_dma_len);
-            assert(context_surfaces->dest_offset < dest_dma_len);
-            dest += context_surfaces->dest_offset;
-
-            NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source - d->vram_ptr,
-                                                 dest - d->vram_ptr);
-
-
-            // FIXME: Blitting from part of a surface
-
-            SurfaceBinding *surf_src = pgraph_surface_get(d, source - d->vram_ptr);
-            if (surf_src) {
-                pgraph_download_surface_data(d, surf_src, true);
-            }
-
-            SurfaceBinding *surf_dest = pgraph_surface_get(d, dest - d->vram_ptr);
-            if (surf_dest) {
-                surf_dest->upload_pending = true;
-            }
-
-            int y;
-            for (y=0; y<image_blit->height; y++) {
-                uint8_t *source_row = source
-                    + (image_blit->in_y + y) * context_surfaces->source_pitch
-                    + image_blit->in_x * bytes_per_pixel;
-
-                uint8_t *dest_row = dest
-                    + (image_blit->out_y + y) * context_surfaces->dest_pitch
-                    + image_blit->out_x * bytes_per_pixel;
-
-                memmove(dest_row, source_row,
-                        image_blit->width * bytes_per_pixel);
-            }
-
-            memory_region_set_client_dirty(d->vram,
-                                           (dest - d->vram_ptr),
-                                           image_blit->height
-                                           * image_blit->width
-                                           * bytes_per_pixel,
-                                           DIRTY_MEMORY_VGA);
-            memory_region_set_client_dirty(d->vram,
-                                           (dest - d->vram_ptr),
-                                           image_blit->height
-                                           * image_blit->width
-                                           * bytes_per_pixel,
-                                           DIRTY_MEMORY_NV2A_TEX);
-
-
-        } else {
-            assert(false);
+        if (image_blit->width && image_blit->height) {
+            pgraph_image_blit(d);
         }
-
         break;
     } break; }
 
     case NV_KELVIN_PRIMITIVE: {
         MethodFunc handler =
-            pgraph_kelvin_method_handlers[METHOD_ADDR_TO_INDEX(method)];
+            pgraph_kelvin_methods[METHOD_ADDR_TO_INDEX(method)].handler;
         if (handler == NULL) {
             NV2A_GL_DPRINTF(true, "    unhandled  (0x%02x 0x%08x)",
                             graphics_class, method);
@@ -1113,11 +1211,13 @@ DEF_METHOD(NV097, SET_CONTEXT_DMA_COLOR)
     pgraph_update_surface(d, false, true, true);
 
     pg->dma_color = parameter;
+    pg->surface_color.buffer_dirty = true;
 }
 
 DEF_METHOD(NV097, SET_CONTEXT_DMA_ZETA)
 {
     pg->dma_zeta = parameter;
+    pg->surface_zeta.buffer_dirty = true;
 }
 
 DEF_METHOD(NV097, SET_CONTEXT_DMA_VERTEX_A)
@@ -1137,6 +1237,8 @@ DEF_METHOD(NV097, SET_CONTEXT_DMA_SEMAPHORE)
 
 DEF_METHOD(NV097, SET_CONTEXT_DMA_REPORT)
 {
+    pgraph_process_pending_reports(d);
+
     pg->dma_report = parameter;
 }
 
@@ -1175,8 +1277,12 @@ DEF_METHOD(NV097, SET_SURFACE_FORMAT)
     pg->surface_shape.log_height =
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_HEIGHT);
 
-    pg->surface_type =
-        GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_TYPE);
+    int surface_type = GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_TYPE);
+    if (surface_type != pg->surface_type) {
+        pg->surface_type = surface_type;
+        pg->surface_color.buffer_dirty = true;
+        pg->surface_zeta.buffer_dirty = true;
+    }
 }
 
 DEF_METHOD(NV097, SET_SURFACE_PITCH)
@@ -2273,6 +2379,62 @@ DEF_METHOD(NV097, SET_LOGIC_OP)
              parameter & 0xF);
 }
 
+static void pgraph_process_pending_report(NV2AState *d, QueryReport *r)
+{
+    PGRAPHState *pg = &d->pgraph;
+
+    if (r->clear) {
+        pg->zpass_pixel_count_result = 0;
+        return;
+    }
+
+    uint8_t type = GET_MASK(r->parameter, NV097_GET_REPORT_TYPE);
+    assert(type == NV097_GET_REPORT_TYPE_ZPASS_PIXEL_CNT);
+
+    /* FIXME: Multisampling affects this (both: OGL and Xbox GPU),
+     *        not sure if CLEARs also count
+     */
+    /* FIXME: What about clipping regions etc? */
+    for (int i = 0; i < r->query_count; i++) {
+        GLuint gl_query_result = 0;
+        glGetQueryObjectuiv(r->queries[i], GL_QUERY_RESULT, &gl_query_result);
+        gl_query_result /= pg->surface_scale_factor * pg->surface_scale_factor;
+        pg->zpass_pixel_count_result += gl_query_result;
+    }
+
+    if (r->query_count) {
+        glDeleteQueries(r->query_count, r->queries);
+        g_free(r->queries);
+    }
+
+    uint64_t timestamp = 0x0011223344556677; /* FIXME: Update timestamp?! */
+    uint32_t done = 0;
+
+    hwaddr report_dma_len;
+    uint8_t *report_data =
+        (uint8_t *)nv_dma_map(d, pg->dma_report, &report_dma_len);
+
+    hwaddr offset = GET_MASK(r->parameter, NV097_GET_REPORT_OFFSET);
+    assert(offset < report_dma_len);
+    report_data += offset;
+
+    stq_le_p((uint64_t *)&report_data[0], timestamp);
+    stl_le_p((uint32_t *)&report_data[8], pg->zpass_pixel_count_result);
+    stl_le_p((uint32_t *)&report_data[12], done);
+}
+
+void pgraph_process_pending_reports(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    QueryReport *r, *next;
+
+    QSIMPLEQ_FOREACH_SAFE(r, &pg->report_queue, entry, next) {
+        pgraph_process_pending_report(d, r);
+        QSIMPLEQ_REMOVE_HEAD(&pg->report_queue, entry);
+        g_free(r);
+    }
+}
+
 DEF_METHOD(NV097, CLEAR_REPORT_VALUE)
 {
     /* FIXME: Does this have a value in parameter? Also does this (also?) modify
@@ -2283,7 +2445,10 @@ DEF_METHOD(NV097, CLEAR_REPORT_VALUE)
                         pg->gl_zpass_pixel_count_queries);
         pg->gl_zpass_pixel_count_query_count = 0;
     }
-    pg->zpass_pixel_count_result = 0;
+
+    QueryReport *r = g_malloc(sizeof(QueryReport));
+    r->clear = true;
+    QSIMPLEQ_INSERT_TAIL(&pg->report_queue, r, entry);
 }
 
 DEF_METHOD(NV097, SET_ZPASS_PIXEL_COUNT_ENABLE)
@@ -2293,47 +2458,18 @@ DEF_METHOD(NV097, SET_ZPASS_PIXEL_COUNT_ENABLE)
 
 DEF_METHOD(NV097, GET_REPORT)
 {
-    /* FIXME: This was first intended to be watchpoint-based. However,
-     *        qemu / kvm only supports virtual-address watchpoints.
-     *        This'll do for now, but accuracy and performance with other
-     *        approaches could be better
-     */
     uint8_t type = GET_MASK(parameter, NV097_GET_REPORT_TYPE);
     assert(type == NV097_GET_REPORT_TYPE_ZPASS_PIXEL_CNT);
-    hwaddr offset = GET_MASK(parameter, NV097_GET_REPORT_OFFSET);
 
-    uint64_t timestamp = 0x0011223344556677; /* FIXME: Update timestamp?! */
-    uint32_t done = 0;
+    QueryReport *r = g_malloc(sizeof(QueryReport));
+    r->clear = false;
+    r->parameter = parameter;
+    r->query_count = pg->gl_zpass_pixel_count_query_count;
+    r->queries = pg->gl_zpass_pixel_count_queries;
+    QSIMPLEQ_INSERT_TAIL(&pg->report_queue, r, entry);
 
-    /* FIXME: Multisampling affects this (both: OGL and Xbox GPU),
-     *        not sure if CLEARs also count
-     */
-    /* FIXME: What about clipping regions etc? */
-    for (int i = 0; i < pg->gl_zpass_pixel_count_query_count; i++) {
-        GLuint gl_query_result;
-        glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
-                            GL_QUERY_RESULT, &gl_query_result);
-        pg->zpass_pixel_count_result += gl_query_result;
-    }
-
-    pg->zpass_pixel_count_result /=
-        pg->surface_scale_factor * pg->surface_scale_factor;
-
-    if (pg->gl_zpass_pixel_count_query_count) {
-        glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-                        pg->gl_zpass_pixel_count_queries);
-    }
     pg->gl_zpass_pixel_count_query_count = 0;
-
-    hwaddr report_dma_len;
-    uint8_t *report_data =
-        (uint8_t *)nv_dma_map(d, pg->dma_report, &report_dma_len);
-    assert(offset < report_dma_len);
-    report_data += offset;
-
-    stq_le_p((uint64_t *)&report_data[0], timestamp);
-    stl_le_p((uint32_t *)&report_data[8], pg->zpass_pixel_count_result);
-    stl_le_p((uint32_t *)&report_data[12], done);
+    pg->gl_zpass_pixel_count_queries = NULL;
 }
 
 DEF_METHOD(NV097, SET_EYE_DIRECTION)
@@ -2671,17 +2807,17 @@ DEF_METHOD(NV097, SET_BEGIN_END)
 
         /* Visibility testing */
         if (pg->zpass_pixel_count_enable) {
-            GLuint gl_query;
-            glGenQueries(1, &gl_query);
             pg->gl_zpass_pixel_count_query_count++;
             pg->gl_zpass_pixel_count_queries = (GLuint*)g_realloc(
                 pg->gl_zpass_pixel_count_queries,
                 sizeof(GLuint) * pg->gl_zpass_pixel_count_query_count);
+
+            GLuint gl_query;
+            glGenQueries(1, &gl_query);
             pg->gl_zpass_pixel_count_queries[
                 pg->gl_zpass_pixel_count_query_count - 1] = gl_query;
             glBeginQuery(GL_SAMPLES_PASSED, gl_query);
         }
-
     }
 
     pgraph_set_surface_dirty(pg, true, depth_test || stencil_test);
@@ -3016,6 +3152,8 @@ DEF_METHOD(NV097, SET_COLOR_CLEAR_VALUE)
 
 DEF_METHOD(NV097, CLEAR_SURFACE)
 {
+    pg->clearing = true;
+
     NV2A_DPRINTF("---------PRE CLEAR ------\n");
     GLbitfield gl_mask = 0;
 
@@ -3173,6 +3311,10 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
     NV2A_DPRINTF("Translated clear rect to %d,%d - %d,%d\n", xmin, ymin,
                  xmin + scissor_width - 1, ymin + scissor_height - 1);
 
+    bool full_clear = !xmin && !ymin &&
+                      scissor_width >= pg->surface_binding_dim.width &&
+                      scissor_height >= pg->surface_binding_dim.height;
+
     pgraph_apply_scaling_factor(pg, &xmin, &ymin);
     pgraph_apply_scaling_factor(pg, &scissor_width, &scissor_height);
 
@@ -3193,6 +3335,15 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
     glDisable(GL_SCISSOR_TEST);
 
     pgraph_set_surface_dirty(pg, write_color, write_zeta);
+
+    if (pg->color_binding) {
+        pg->color_binding->cleared = full_clear && write_color;
+    }
+    if (pg->zeta_binding) {
+        pg->zeta_binding->cleared = full_clear && write_zeta;
+    }
+
+    pg->clearing = false;
 }
 
 DEF_METHOD(NV097, SET_CLEAR_RECT_HORIZONTAL)
@@ -3315,11 +3466,10 @@ void pgraph_context_switch(NV2AState *d, unsigned int channel_id)
     }
 }
 
-// static const char* nv2a_method_names[] = {};
-
 static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter) {
+#ifdef DEBUG_NV2A
     static unsigned int last = 0;
     static unsigned int count = 0;
     if (last == 0x1800 && method != last) {
@@ -3327,36 +3477,38 @@ static void pgraph_method_log(unsigned int subchannel,
                      subchannel, last, count);
     }
     if (method != 0x1800) {
-        // const char* method_name = NULL;
+        const char* method_name = NULL;
         // unsigned int nmethod = 0;
-        // switch (graphics_class) {
-        //     case NV_KELVIN_PRIMITIVE:
-        //         nmethod = method | (0x5c << 16);
-        //         break;
-        //     case NV_CONTEXT_SURFACES_2D:
-        //         nmethod = method | (0x6d << 16);
-        //         break;
-        //     case NV_CONTEXT_PATTERN:
-        //         nmethod = method | (0x68 << 16);
-        //         break;
-        //     default:
-        //         break;
-        // }
-        // if (nmethod != 0 && nmethod < ARRAY_SIZE(nv2a_method_names)) {
-        //     method_name = nv2a_method_names[nmethod];
-        // }
-        // if (method_name) {
-        //     NV2A_DPRINTF("pgraph method (%d): %s (0x%x)\n",
-        //                  subchannel, method_name, parameter);
-        // } else {
+        switch (graphics_class) {
+            case NV_KELVIN_PRIMITIVE: {
+                // nmethod = method | (0x5c << 16);
+                int idx = METHOD_ADDR_TO_INDEX(method);
+                if (idx < ARRAY_SIZE(pgraph_kelvin_methods)) {
+                    method_name = pgraph_kelvin_methods[idx].name;
+                }
+                break;
+            }
+            case NV_CONTEXT_SURFACES_2D:
+                // nmethod = method | (0x6d << 16);
+                break;
+            case NV_CONTEXT_PATTERN:
+                // nmethod = method | (0x68 << 16);
+                break;
+            default:
+                break;
+        }
+        if (method_name) {
+            NV2A_DPRINTF("pgraph method (%d): %s (0x%x)\n",
+                         subchannel, method_name, parameter);
+        } else {
             NV2A_DPRINTF("pgraph method (%d): 0x%x -> 0x%04x (0x%x)\n",
                          subchannel, graphics_class, method, parameter);
-        // }
-
+        }
     }
     if (method == last) { count++; }
     else {count = 0; }
     last = method;
+#endif
 }
 
 static void pgraph_allocate_inline_buffer_vertices(PGRAPHState *pg,
@@ -3498,6 +3650,8 @@ void pgraph_init(NV2AState *d)
 
     pgraph_init_render_to_texture(d);
     QTAILQ_INIT(&pg->surfaces);
+
+    QSIMPLEQ_INIT(&pg->report_queue);
 
     //glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
 
@@ -4151,11 +4305,15 @@ static void pgraph_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
     if (pg->color_binding) {
         pg->color_binding->draw_dirty |= color;
         pg->color_binding->frame_time = pg->frame_time;
+        pg->color_binding->cleared = false;
+
     }
 
     if (pg->zeta_binding) {
         pg->zeta_binding->draw_dirty |= zeta;
         pg->zeta_binding->frame_time = pg->frame_time;
+        pg->zeta_binding->cleared = false;
+
     }
 }
 
@@ -4950,8 +5108,7 @@ static bool pgraph_check_surface_compatibility(SurfaceBinding *s1,
         (s1->fmt.gl_internal_format == s2->fmt.gl_internal_format) &&
         (s1->pitch == s2->pitch) &&
         (s1->shape.clip_x <= s2->shape.clip_x) &&
-        (s1->shape.clip_y <= s2->shape.clip_y) &&
-        (s1->swizzle == s2->swizzle);
+        (s1->shape.clip_y <= s2->shape.clip_y);
     if (!format_compatible) {
         return false;
     }
@@ -5558,8 +5715,7 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
     entry->dma_len = dma.limit;
     entry->frame_time = pg->frame_time;
     entry->draw_time = pg->draw_time;
-
-    assert(entry->pitch >= (entry->width * entry->fmt.bytes_per_pixel));
+    entry->cleared = false;
 }
 
 static void pgraph_populate_surface_binding_entry(NV2AState *d, bool color,
@@ -5640,6 +5796,24 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
                          found->shape.anti_aliasing, found->shape.clip_x,
                          found->shape.clip_width, found->shape.clip_y,
                          found->shape.clip_height);
+
+            assert(!(entry.swizzle && pg->clearing));
+
+            if (found->swizzle != entry.swizzle) {
+                /* Clears should only be done on linear surfaces. Avoid
+                 * synchronization by allowing (1) a surface marked swizzled to
+                 * be cleared under the assumption the entire surface is
+                 * destined to be cleared and (2) a fully cleared linear surface
+                 * to be marked swizzled. Strictly match size to avoid
+                 * pathological cases.
+                 */
+                is_compatible &= (pg->clearing || found->cleared) &&
+                    pgraph_check_surface_compatibility(found, &entry, true);
+                if (is_compatible) {
+                    NV2A_XPRINTF(DBG_SURFACES, "Migrating surface type to %s\n",
+                                 entry.swizzle ? "swizzled" : "linear");
+                }
+            }
 
             if (is_compatible && color &&
                 !pgraph_check_surface_compatibility(found, &entry, true)) {
@@ -5961,7 +6135,7 @@ static void pgraph_bind_textures(NV2AState *d)
                                               NV_PGRAPH_TEXFMT0_BORDER_SOURCE);
         uint32_t border_color = pg->regs[NV_PGRAPH_BORDERCOLOR0 + i*4];
 
-        unsigned int offset = pg->regs[NV_PGRAPH_TEXOFFSET0 + i*4];
+        hwaddr offset = pg->regs[NV_PGRAPH_TEXOFFSET0 + i*4];
 
         bool palette_dma_select =
             GET_MASK(palette, NV_PGRAPH_TEXPALETTE0_CONTEXT_DMA);

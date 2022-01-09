@@ -750,6 +750,10 @@
 /* graphic classes and methods */
 #define NV_SET_OBJECT                                        0x00000000
 
+#define NV_BETA                                          0x0012
+#   define NV012_SET_OBJECT                                   0x00000000
+#   define NV012_SET_BETA                                     0x00000300
+
 #define NV_MEMORY_TO_MEMORY_FORMAT                       0x0039
 
 #define NV_CONTEXT_PATTERN                               0x0044
@@ -762,6 +766,7 @@
 #   define NV062_SET_COLOR_FORMAT                             0x00000300
 #       define NV062_SET_COLOR_FORMAT_LE_Y8                    0x01
 #       define NV062_SET_COLOR_FORMAT_LE_R5G6B5                0x04
+#       define NV062_SET_COLOR_FORMAT_LE_X8R8G8B8_Z8R8G8B8     0x06
 #       define NV062_SET_COLOR_FORMAT_LE_X8R8G8B8              0x07
 #       define NV062_SET_COLOR_FORMAT_LE_A8R8G8B8              0x0A
 #       define NV062_SET_COLOR_FORMAT_LE_Y32                   0x0B
@@ -773,6 +778,7 @@
 #   define NV09F_SET_OBJECT                                   0x00000000
 #   define NV09F_SET_CONTEXT_SURFACES                         0x0000019C
 #   define NV09F_SET_OPERATION                                0x000002FC
+#       define NV09F_SET_OPERATION_BLEND_AND                      2
 #       define NV09F_SET_OPERATION_SRCCOPY                        3
 #   define NV09F_CONTROL_POINT_IN                             0x00000300
 #   define NV09F_CONTROL_POINT_OUT                            0x00000304

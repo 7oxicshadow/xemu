@@ -25,6 +25,7 @@
 #include <assert.h>
 
 #include "qemu/osdep.h"
+#include "qemu/units.h"
 #include "qemu/thread.h"
 #include "qemu/queue.h"
 #include "qemu/main-loop.h"
@@ -149,6 +150,7 @@ typedef struct SurfaceBinding {
 
     GLuint gl_buffer;
 
+    bool cleared;
     int frame_time;
     int draw_time;
     bool draw_dirty;
@@ -228,6 +230,19 @@ typedef struct ImageBlitState {
     unsigned int width, height;
 } ImageBlitState;
 
+typedef struct BetaState {
+  hwaddr object_instance;
+  uint32_t beta;
+} BetaState;
+
+typedef struct QueryReport {
+    QSIMPLEQ_ENTRY(QueryReport) entry;
+    bool clear;
+    uint32_t parameter;
+    unsigned int query_count;
+    GLuint *queries;
+} QueryReport;
+
 typedef struct PGRAPHState {
     QemuMutex lock;
 
@@ -261,6 +276,7 @@ typedef struct PGRAPHState {
     ContextSurfaces2DState context_surfaces_2d;
     ImageBlitState image_blit;
     KelvinState kelvin;
+    BetaState beta;
 
     hwaddr dma_color, dma_zeta;
     Surface surface_color, surface_zeta;
@@ -308,6 +324,7 @@ typedef struct PGRAPHState {
     unsigned int zpass_pixel_count_result;
     unsigned int gl_zpass_pixel_count_query_count;
     GLuint *gl_zpass_pixel_count_queries;
+    QSIMPLEQ_HEAD(, QueryReport) report_queue;
 
     hwaddr dma_vertex_a, dma_vertex_b;
 
@@ -365,6 +382,7 @@ typedef struct PGRAPHState {
 
     uint32_t regs[0x2000];
 
+    bool clearing;
     bool waiting_for_nop;
     bool waiting_for_flip;
     bool waiting_for_context_switch;
@@ -524,6 +542,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel, unsigned int method,
                   uint32_t parameter, uint32_t *parameters,
                   size_t num_words_available, size_t max_lookahead_words);
 void pgraph_gl_sync(NV2AState *d);
+void pgraph_process_pending_reports(NV2AState *d);
 void pgraph_process_pending_downloads(NV2AState *d);
 void pgraph_download_dirty_surfaces(NV2AState *d);
 void pgraph_flush(NV2AState *d);
