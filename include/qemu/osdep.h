@@ -177,7 +177,7 @@ extern "C" {
  * fixing error handling that should use Error instead of assert.
  */
 #ifdef NDEBUG
-//#error building with NDEBUG is not supported
+#error building with NDEBUG is not supported
 #endif
 #ifdef G_DISABLE_ASSERT
 #error building with G_DISABLE_ASSERT is not supported

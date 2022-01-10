@@ -1,4 +1,4 @@
-#define NDEBUG /*
+/*
  * QEMU Geforce NV2A implementation
  *
  * Copyright (c) 2012 espes

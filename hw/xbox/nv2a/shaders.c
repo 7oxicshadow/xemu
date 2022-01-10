@@ -1,4 +1,4 @@
-#define NDEBUG /*
+/*
  * QEMU Geforce NV2A shader generator
  *
  * Copyright (c) 2015 espes
