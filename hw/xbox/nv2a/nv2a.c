@@ -120,7 +120,7 @@ const struct NV2ABlockInfo blocktable[] = {
 };
 #undef ENTRY
 
-#ifdef NV2A_DEBUG
+#ifdef DEBUG_NV2A_REG
 static const char *nv2a_reg_names[] = {};
 
 void nv2a_reg_log_read(int block, hwaddr addr, uint64_t val)
@@ -343,6 +343,12 @@ static void nv2a_reset(NV2AState *d)
     d->pfifo.pending_interrupts = 0;
     d->ptimer.pending_interrupts = 0;
     d->pcrtc.pending_interrupts = 0;
+
+    for (int i = 0; i < 256; i++) {
+        d->puserdac.palette[i*3]   = i;
+        d->puserdac.palette[i*3+1] = i;
+        d->puserdac.palette[i*3+2] = i;
+    }
 
     nv2a_unlock_fifo(d);
 }

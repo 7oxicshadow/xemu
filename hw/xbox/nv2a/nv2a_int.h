@@ -265,6 +265,8 @@ typedef struct PGRAPHState {
         GLint pvideo_enable_loc;
         GLint pvideo_tex_loc;
         GLint pvideo_pos_loc;
+        GLint pvideo_color_key_enable_loc;
+        GLint pvideo_color_key_loc;
         GLint palette_loc[256];
     } disp_rndr;
 
@@ -492,7 +494,7 @@ extern GloContext *g_nv2a_context_display;
 
 void nv2a_update_irq(NV2AState *d);
 
-#ifdef NV2A_DEBUG
+#ifdef DEBUG_NV2A_REG
 void nv2a_reg_log_read(int block, hwaddr addr, uint64_t val);
 void nv2a_reg_log_write(int block, hwaddr addr, uint64_t val);
 #else
