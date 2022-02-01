@@ -648,6 +648,7 @@ void xemu_mount_xmu(int card)
     char xmu1_cmd[250] = "drive_add 0 if=none,id=usbdisk1,file=";
     char xmu2_cmd[250] = "drive_add 0 if=none,id=usbdisk2,file=";
     FILE *file;
+    char buf[128];
 
     /* Check that a controller is bound before trying to attach xmu */
     if (bound_controllers[0])
@@ -665,6 +666,9 @@ void xemu_mount_xmu(int card)
                     handle_hmp_command(0, "stop");
                     handle_hmp_command(0, "device_add usb-storage,drive=usbdisk1,port=1.3.2");
                     handle_hmp_command(0, "cont");
+                                        
+                    snprintf(buf, sizeof(buf), "XMU1 Connected");
+                    xemu_queue_notification(buf);
                 } else {
                     fprintf(stderr,"XMU1 file does not exist\n");
                 }
@@ -681,6 +685,9 @@ void xemu_mount_xmu(int card)
                     handle_hmp_command(0, "stop");
                     handle_hmp_command(0, "device_add usb-storage,drive=usbdisk2,port=1.3.3");
                     handle_hmp_command(0, "cont");
+
+                    snprintf(buf, sizeof(buf), "XMU2 Connected");
+                    xemu_queue_notification(buf);
                 } else {
                     fprintf(stderr,"XMU2 file does not exist\n");
                 }
