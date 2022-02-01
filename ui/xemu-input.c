@@ -33,6 +33,8 @@
 #include "xemu-notifications.h"
 #include "xemu-settings.h"
 
+#include "monitor/monitor-internal.h"
+
 // #define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
@@ -638,4 +640,26 @@ void xemu_input_set_test_mode(int enabled)
 int xemu_input_get_test_mode(void)
 {
     return test_mode;
+}
+
+void xemu_mount_xmu(int card)
+{
+    if(card == 1U)
+    {
+        handle_hmp_command(0, "drive_add 0 if=none,id=usbdisk1,file=./xmu1.img");
+        handle_hmp_command(0, "stop");
+        handle_hmp_command(0, "device_add usb-storage,drive=usbdisk1,port=1.3.2");
+        handle_hmp_command(0, "cont");
+    }
+    else if(card == 2U)
+    {
+        handle_hmp_command(0, "drive_add 0 if=none,id=usbdisk2,file=./xmu2.img");
+        handle_hmp_command(0, "stop");
+        handle_hmp_command(0, "device_add usb-storage,drive=usbdisk2,port=1.3.3");
+        handle_hmp_command(0, "cont");
+    }
+    else
+    {
+        /* do nothing */
+    }
 }

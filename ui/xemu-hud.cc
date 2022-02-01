@@ -2314,6 +2314,17 @@ static void ShowMainMenu()
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("XMU"))
+        {
+            if (ImGui::MenuItem("Mount XMU1", NULL)) {
+                xemu_mount_xmu(1);
+            }
+            if (ImGui::MenuItem("Mount XMU2", NULL)) {
+                xemu_mount_xmu(2);
+            }
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Help"))
         {
             if (ImGui::MenuItem("Help", NULL))

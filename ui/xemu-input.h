@@ -116,6 +116,7 @@ int xemu_input_get_controller_default_bind_port(ControllerState *state, int star
 
 void xemu_input_set_test_mode(int enabled);
 int xemu_input_get_test_mode(void);
+void xemu_mount_xmu(int card);
 
 #ifdef __cplusplus
 }
