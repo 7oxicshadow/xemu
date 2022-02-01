@@ -795,6 +795,8 @@ private:
     char bootrom_path[MAX_STRING_LEN];
     char hdd_path[MAX_STRING_LEN];
     char eeprom_path[MAX_STRING_LEN];
+    char xmu1_path[MAX_STRING_LEN];
+    char xmu2_path[MAX_STRING_LEN];
     int  memory_idx;
     bool short_animation;
 #if defined(_WIN32)
@@ -846,6 +848,16 @@ public:
         assert(len < MAX_STRING_LEN);
         strncpy(eeprom_path, tmp, sizeof(eeprom_path));
 
+        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, &tmp);
+        len = strlen(tmp);
+        assert(len < MAX_STRING_LEN);
+        strncpy(xmu1_path, tmp, sizeof(xmu1_path));
+
+        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, &tmp);
+        len = strlen(tmp);
+        assert(len < MAX_STRING_LEN);
+        strncpy(xmu2_path, tmp, sizeof(xmu2_path));
+
         xemu_settings_get_int(XEMU_SETTINGS_SYSTEM_MEMORY, &tmp_int);
         memory_idx = (tmp_int-64)/64;
 
@@ -866,6 +878,8 @@ public:
         xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_BOOTROM_PATH, bootrom_path);
         xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_HDD_PATH, hdd_path);
         xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_EEPROM_PATH, eeprom_path);
+        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, xmu1_path);
+        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, xmu2_path);
         xemu_settings_set_int(XEMU_SETTINGS_SYSTEM_MEMORY, 64+memory_idx*64);
         xemu_settings_set_bool(XEMU_SETTINGS_SYSTEM_SHORTANIM, short_animation);
 #if defined(_WIN32)
@@ -910,6 +924,7 @@ public:
 
         const char *rom_file_filters = ".bin Files\0*.bin\0.rom Files\0*.rom\0All Files\0*.*\0";
         const char *qcow_file_filters = ".qcow2 Files\0*.qcow2\0All Files\0*.*\0";
+        const char *xmu_file_filters = ".xmu Files\0*.xmu\0.bin Files\0*.bin\0All Files\0*.*\0";
 
         ImGui::Columns(2, "", false);
         ImGui::SetColumnWidth(0, ImGui::GetWindowWidth()*0.25);
@@ -937,6 +952,18 @@ public:
         ImGui::NextColumn();
         ImGui::SetNextItemWidth(picker_width);
         FilePicker("###EEPROM", eeprom_path, sizeof(eeprom_path), rom_file_filters);
+        ImGui::NextColumn();
+
+        ImGui::Text("XMU1 File");
+        ImGui::NextColumn();
+        ImGui::SetNextItemWidth(picker_width);
+        FilePicker("###XMU1", xmu1_path, sizeof(xmu1_path), xmu_file_filters);
+        ImGui::NextColumn();
+
+        ImGui::Text("XMU2 File");
+        ImGui::NextColumn();
+        ImGui::SetNextItemWidth(picker_width);
+        FilePicker("###XMU2", xmu2_path, sizeof(xmu2_path), xmu_file_filters);
         ImGui::NextColumn();
 
         ImGui::Text("System Memory");

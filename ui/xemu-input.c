@@ -644,22 +644,59 @@ int xemu_input_get_test_mode(void)
 
 void xemu_mount_xmu(int card)
 {
-    if(card == 1U)
+    const char *tmp;
+    char xmu1_cmd[250] = "drive_add 0 if=none,id=usbdisk1,file=";
+    char xmu2_cmd[250] = "drive_add 0 if=none,id=usbdisk2,file=";
+    FILE *file;
+
+    /* Check that a controller is bound before trying to attach xmu */
+    if (bound_controllers[0])
     {
-        handle_hmp_command(0, "drive_add 0 if=none,id=usbdisk1,file=./xmu1.img");
-        handle_hmp_command(0, "stop");
-        handle_hmp_command(0, "device_add usb-storage,drive=usbdisk1,port=1.3.2");
-        handle_hmp_command(0, "cont");
-    }
-    else if(card == 2U)
-    {
-        handle_hmp_command(0, "drive_add 0 if=none,id=usbdisk2,file=./xmu2.img");
-        handle_hmp_command(0, "stop");
-        handle_hmp_command(0, "device_add usb-storage,drive=usbdisk2,port=1.3.3");
-        handle_hmp_command(0, "cont");
+        if(bound_controllers[0]->type == INPUT_DEVICE_SDL_GAMECONTROLLER)
+        {
+            if(card == 1U)
+            {
+                xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, &tmp);
+
+                if (file = fopen(tmp, "r")) {
+                    fclose(file);
+                    strcat(xmu1_cmd,tmp);
+                    handle_hmp_command(0, xmu1_cmd);
+                    handle_hmp_command(0, "stop");
+                    handle_hmp_command(0, "device_add usb-storage,drive=usbdisk1,port=1.3.2");
+                    handle_hmp_command(0, "cont");
+                } else {
+                    fprintf(stderr,"XMU1 file does not exist\n");
+                }
+
+            }
+            else if(card == 2U)
+            {
+                xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, &tmp);
+                
+                if (file = fopen(tmp, "r")) {
+                    fclose(file);
+                    strcat(xmu2_cmd,tmp);
+                    handle_hmp_command(0, xmu2_cmd);
+                    handle_hmp_command(0, "stop");
+                    handle_hmp_command(0, "device_add usb-storage,drive=usbdisk2,port=1.3.3");
+                    handle_hmp_command(0, "cont");
+                } else {
+                    fprintf(stderr,"XMU2 file does not exist\n");
+                }
+            }
+            else
+            {
+                /* do nothing */
+            }
+        }
+        else
+        {
+            fprintf(stderr,"XMU - Not set to controller type?\n");
+        }
     }
     else
     {
-        /* do nothing */
+        fprintf(stderr,"XMU - No Controller Bound\n");
     }
 }

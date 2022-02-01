@@ -44,6 +44,8 @@ struct xemu_settings {
 	char *hdd_path;
 	char *dvd_path;
 	char *eeprom_path;
+	char *xmu1_path;
+	char *xmu2_path;
 	int   memory;
 	int   short_animation; // Boolean
 	int   hard_fpu; // Boolean
@@ -149,6 +151,8 @@ struct config_offset_table {
 	[XEMU_SETTINGS_SYSTEM_HDD_PATH]     = { CONFIG_TYPE_STRING, "system", "hdd_path",     offsetof(struct xemu_settings, hdd_path),        { .default_str  = "" } },
 	[XEMU_SETTINGS_SYSTEM_DVD_PATH]     = { CONFIG_TYPE_STRING, "system", "dvd_path",     offsetof(struct xemu_settings, dvd_path),        { .default_str  = "" } },
 	[XEMU_SETTINGS_SYSTEM_EEPROM_PATH]  = { CONFIG_TYPE_STRING, "system", "eeprom_path",  offsetof(struct xemu_settings, eeprom_path),     { .default_str  = "" } },
+	[XEMU_SETTINGS_SYSTEM_XMU1_PATH]    = { CONFIG_TYPE_STRING, "system", "xmu1_path",    offsetof(struct xemu_settings, xmu1_path),       { .default_str  = "" } },
+	[XEMU_SETTINGS_SYSTEM_XMU2_PATH]    = { CONFIG_TYPE_STRING, "system", "xmu2_path",    offsetof(struct xemu_settings, xmu2_path),       { .default_str  = "" } },
 	[XEMU_SETTINGS_SYSTEM_MEMORY]       = { CONFIG_TYPE_INT,    "system", "memory",       offsetof(struct xemu_settings, memory),          { .default_int  = 64 } },
 	[XEMU_SETTINGS_SYSTEM_SHORTANIM]    = { CONFIG_TYPE_BOOL,   "system", "shortanim",    offsetof(struct xemu_settings, short_animation), { .default_bool = 0  } },
 	[XEMU_SETTINGS_SYSTEM_HARD_FPU]     = { CONFIG_TYPE_BOOL,   "system", "hard_fpu",     offsetof(struct xemu_settings, hard_fpu),        { .default_bool = 1  } },
