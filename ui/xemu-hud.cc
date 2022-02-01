@@ -2612,10 +2612,12 @@ void xemu_hud_render(void)
     	fps_manager.Draw();
     }
 
+#ifdef ENABLE_RENDERDOC
     if (capture_renderdoc_frame) {
         nv2a_dbg_renderdoc_capture_frames(1);
         capture_renderdoc_frame = false;
     }
+#endif
 
     bool show_main_menu = true;
 
