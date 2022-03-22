@@ -291,11 +291,11 @@ static const ColorFormatInfo kelvin_color_format_map[66] = {
     [NV097_SET_TEXTURE_FORMAT_COLOR_SZ_R6G5B5] =
         {2, false, GL_RGB8_SNORM, GL_RGB, GL_BYTE}, /* FIXME: This might be signed */
     [NV097_SET_TEXTURE_FORMAT_COLOR_SZ_G8B8] =
-        {2, false, GL_RG8_SNORM, GL_RG, GL_BYTE, /* FIXME: This might be signed */
-         {GL_ONE, GL_GREEN, GL_RED, GL_ONE}},
+        {2, false, GL_RG8, GL_RG, GL_UNSIGNED_BYTE,
+         {GL_RED, GL_GREEN, GL_RED, GL_GREEN}},
     [NV097_SET_TEXTURE_FORMAT_COLOR_SZ_R8B8] =
-        {2, false, GL_RG8_SNORM, GL_RG, GL_BYTE, /* FIXME: This might be signed */
-         {GL_GREEN, GL_ONE, GL_RED, GL_ONE}},
+        {2, false, GL_RG8, GL_RG, GL_UNSIGNED_BYTE,
+         {GL_GREEN, GL_RED, GL_RED, GL_GREEN}},
 
     [NV097_SET_TEXTURE_FORMAT_COLOR_LC_IMAGE_CR8YB8CB8YA8] =
         {2, true, GL_RGBA8,  GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV},
@@ -2260,7 +2260,107 @@ DEF_METHOD_INC(NV097, SET_VERTEX4F)
     }
 }
 
-#define SET_VERTEX_ATTRIBUTE(command, attr_index) \
+DEF_METHOD_INC(NV097, SET_NORMAL3S)
+{
+    int slot = (method - NV097_SET_NORMAL3S) / 4;
+    unsigned int part = slot % 2;
+    VertexAttribute *attribute =
+        &pg->vertex_attributes[NV2A_VERTEX_ATTR_NORMAL];
+    pgraph_allocate_inline_buffer_vertices(pg, NV2A_VERTEX_ATTR_NORMAL);
+    int16_t val = parameter & 0xFFFF;
+    attribute->inline_value[part * 2 + 0] = MAX(-1.0f, (float)val / 32767.0f);
+    val = parameter >> 16;
+    attribute->inline_value[part * 2 + 1] = MAX(-1.0f, (float)val / 32767.0f);
+}
+
+#define SET_VERTEX_ATTRIBUTE_4S(command, attr_index)                     \
+    do {                                                                   \
+        int slot = (method - (command)) / 4;                               \
+        unsigned int part = slot % 2;                                      \
+        VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
+        pgraph_allocate_inline_buffer_vertices(pg, (attr_index));          \
+        attribute->inline_value[part * 2 + 0] =                            \
+            (float)(int16_t)(parameter & 0xFFFF);                          \
+        attribute->inline_value[part * 2 + 1] =                            \
+            (float)(int16_t)(parameter >> 16);                             \
+    } while (0)
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD0_4S)
+{
+    SET_VERTEX_ATTRIBUTE_4S(NV097_SET_TEXCOORD0_4S, NV2A_VERTEX_ATTR_TEXTURE0);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD1_4S)
+{
+    SET_VERTEX_ATTRIBUTE_4S(NV097_SET_TEXCOORD1_4S, NV2A_VERTEX_ATTR_TEXTURE1);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD2_4S)
+{
+    SET_VERTEX_ATTRIBUTE_4S(NV097_SET_TEXCOORD2_4S, NV2A_VERTEX_ATTR_TEXTURE2);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD3_4S)
+{
+    SET_VERTEX_ATTRIBUTE_4S(NV097_SET_TEXCOORD3_4S, NV2A_VERTEX_ATTR_TEXTURE3);
+}
+
+#undef SET_VERTEX_ATTRIBUTE_4S
+
+#define SET_VERTEX_ATRIBUTE_TEX_2S(attr_index)                             \
+    do {                                                                   \
+        VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
+        pgraph_allocate_inline_buffer_vertices(pg, (attr_index));          \
+        attribute->inline_value[0] = (float)(int16_t)(parameter & 0xFFFF); \
+        attribute->inline_value[1] = (float)(int16_t)(parameter >> 16);    \
+        attribute->inline_value[2] = 0.0f;                                 \
+        attribute->inline_value[3] = 1.0f;                                 \
+    } while (0)
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD0_2S)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2S(NV2A_VERTEX_ATTR_TEXTURE0);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD1_2S)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2S(NV2A_VERTEX_ATTR_TEXTURE1);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD2_2S)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2S(NV2A_VERTEX_ATTR_TEXTURE2);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD3_2S)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2S(NV2A_VERTEX_ATTR_TEXTURE3);
+}
+
+#undef SET_VERTEX_ATRIBUTE_TEX_2S
+
+#define SET_VERTEX_COLOR_3F(command, attr_index)                           \
+    do {                                                                   \
+        int slot = (method - (command)) / 4;                               \
+        VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
+        pgraph_allocate_inline_buffer_vertices(pg, (attr_index));          \
+        attribute->inline_value[slot] = *(float*)&parameter;               \
+        attribute->inline_value[3] = 1.0f;                                 \
+    } while (0)
+
+DEF_METHOD_INC(NV097, SET_DIFFUSE_COLOR3F)
+{
+    SET_VERTEX_COLOR_3F(NV097_SET_DIFFUSE_COLOR3F, NV2A_VERTEX_ATTR_DIFFUSE);
+}
+
+DEF_METHOD_INC(NV097, SET_SPECULAR_COLOR3F)
+{
+    SET_VERTEX_COLOR_3F(NV097_SET_SPECULAR_COLOR3F, NV2A_VERTEX_ATTR_SPECULAR);
+}
+
+#undef SET_VERTEX_COLOR_3F
+
+#define SET_VERTEX_ATTRIBUTE_F(command, attr_index)                        \
     do {                                                                   \
         int slot = (method - (command)) / 4;                               \
         VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
@@ -2268,42 +2368,104 @@ DEF_METHOD_INC(NV097, SET_VERTEX4F)
         attribute->inline_value[slot] = *(float*)&parameter;               \
     } while (0)
 
-DEF_METHOD_INC(NV097, SET_NORMAL)
+DEF_METHOD_INC(NV097, SET_NORMAL3F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_NORMAL, NV2A_VERTEX_ATTR_NORMAL);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_NORMAL3F, NV2A_VERTEX_ATTR_NORMAL);
 }
 
 DEF_METHOD_INC(NV097, SET_DIFFUSE_COLOR4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_DIFFUSE_COLOR4F, NV2A_VERTEX_ATTR_DIFFUSE);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_DIFFUSE_COLOR4F, NV2A_VERTEX_ATTR_DIFFUSE);
 }
 
 DEF_METHOD_INC(NV097, SET_SPECULAR_COLOR4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_SPECULAR_COLOR4F, NV2A_VERTEX_ATTR_SPECULAR);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_SPECULAR_COLOR4F,
+                           NV2A_VERTEX_ATTR_SPECULAR);
 }
 
-DEF_METHOD_INC(NV097, SET_TEXCOORD0)
+DEF_METHOD_INC(NV097, SET_TEXCOORD0_4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_TEXCOORD0, NV2A_VERTEX_ATTR_TEXTURE0);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_TEXCOORD0_4F, NV2A_VERTEX_ATTR_TEXTURE0);
 }
 
-DEF_METHOD_INC(NV097, SET_TEXCOORD1)
+DEF_METHOD_INC(NV097, SET_TEXCOORD1_4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_TEXCOORD1, NV2A_VERTEX_ATTR_TEXTURE1);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_TEXCOORD1_4F, NV2A_VERTEX_ATTR_TEXTURE1);
 }
 
-DEF_METHOD_INC(NV097, SET_TEXCOORD2)
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD2_4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_TEXCOORD2, NV2A_VERTEX_ATTR_TEXTURE2);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_TEXCOORD2_4F, NV2A_VERTEX_ATTR_TEXTURE2);
 }
 
-DEF_METHOD_INC(NV097, SET_TEXCOORD3)
+DEF_METHOD_INC(NV097, SET_TEXCOORD3_4F)
 {
-    SET_VERTEX_ATTRIBUTE(NV097_SET_TEXCOORD3, NV2A_VERTEX_ATTR_TEXTURE3);
+    SET_VERTEX_ATTRIBUTE_F(NV097_SET_TEXCOORD3_4F, NV2A_VERTEX_ATTR_TEXTURE3);
 }
 
-#undef SET_VERTEX_ATTRIBUTE
+#undef SET_VERTEX_ATTRIBUTE_F
+
+#define SET_VERTEX_ATRIBUTE_TEX_2F(command, attr_index)                    \
+    do {                                                                   \
+        int slot = (method - (command)) / 4;                               \
+        VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
+        pgraph_allocate_inline_buffer_vertices(pg, (attr_index));          \
+        attribute->inline_value[slot] = *(float*)&parameter;               \
+        attribute->inline_value[2] = 0.0f;                                 \
+        attribute->inline_value[3] = 1.0f;                                 \
+    } while (0)
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD0_2F)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2F(NV097_SET_TEXCOORD0_2F,
+                               NV2A_VERTEX_ATTR_TEXTURE0);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD1_2F)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2F(NV097_SET_TEXCOORD1_2F,
+                               NV2A_VERTEX_ATTR_TEXTURE1);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD2_2F)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2F(NV097_SET_TEXCOORD2_2F,
+                               NV2A_VERTEX_ATTR_TEXTURE2);
+}
+
+DEF_METHOD_INC(NV097, SET_TEXCOORD3_2F)
+{
+    SET_VERTEX_ATRIBUTE_TEX_2F(NV097_SET_TEXCOORD3_2F,
+                               NV2A_VERTEX_ATTR_TEXTURE3);
+}
+
+#undef SET_VERTEX_ATRIBUTE_TEX_2F
+
+#define SET_VERTEX_ATTRIBUTE_4UB(command, attr_index)                       \
+    do {                                                                   \
+        VertexAttribute *attribute = &pg->vertex_attributes[(attr_index)]; \
+        pgraph_allocate_inline_buffer_vertices(pg, (attr_index));          \
+        attribute->inline_value[0] = (parameter & 0xFF) / 255.0f;          \
+        attribute->inline_value[1] = ((parameter >> 8) & 0xFF) / 255.0f;   \
+        attribute->inline_value[2] = ((parameter >> 16) & 0xFF) / 255.0f;  \
+        attribute->inline_value[3] = ((parameter >> 24) & 0xFF) / 255.0f;  \
+    } while (0)
+
+DEF_METHOD_INC(NV097, SET_DIFFUSE_COLOR4UB)
+{
+    SET_VERTEX_ATTRIBUTE_4UB(NV097_SET_DIFFUSE_COLOR4UB,
+                             NV2A_VERTEX_ATTR_DIFFUSE);
+}
+
+DEF_METHOD_INC(NV097, SET_SPECULAR_COLOR4UB)
+{
+    SET_VERTEX_ATTRIBUTE_4UB(NV097_SET_SPECULAR_COLOR4UB,
+                             NV2A_VERTEX_ATTR_SPECULAR);
+}
+
+#undef SET_VERTEX_ATTRIBUTE_4UB
 
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_FORMAT)
 {
@@ -6581,6 +6743,68 @@ static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
     }
 }
 
+static void pgraph_update_inline_value(VertexAttribute *attr,
+                                       const uint8_t *data)
+{
+    assert(attr->count <= 4);
+    attr->inline_value[0] = 0.0f;
+    attr->inline_value[1] = 0.0f;
+    attr->inline_value[2] = 0.0f;
+    attr->inline_value[3] = 1.0f;
+
+    switch (attr->format) {
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_UB_D3D:
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_UB_OGL:
+            for (uint32_t i = 0; i < attr->count; ++i) {
+                attr->inline_value[i] = (float)data[i] / 255.0f;
+            }
+            break;
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_S1: {
+            const int16_t *val = (const int16_t *) data;
+            for (uint32_t i = 0; i < attr->count; ++i, ++val) {
+                attr->inline_value[i] = MAX(-1.0f, (float) *val / 32767.0f);
+            }
+            break;
+        }
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_F:
+            memcpy(attr->inline_value, data, attr->size * attr->count);
+            break;
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_S32K: {
+            const int16_t *val = (const int16_t *) data;
+            for (uint32_t i = 0; i < attr->count; ++i, ++val) {
+                attr->inline_value[i] = (float)*val;
+            }
+            break;
+        }
+        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_CMP: {
+            /* 3 signed, normalized components packed in 32-bits. (11,11,10) */
+            const int32_t val = *(const int32_t *)data;
+            int32_t x = val & 0x7FF;
+            if (x & 0x400) {
+                x |= 0xFFFFF800;
+            }
+            int32_t y = (val >> 11) & 0x7FF;
+            if (y & 0x400) {
+                y |= 0xFFFFF800;
+            }
+            int32_t z = (val >> 22) & 0x7FF;
+            if (z & 0x200) {
+                z |= 0xFFFFFC00;
+            }
+
+            attr->inline_value[0] = MAX(-1.0f, (float)x / 1023.0f);
+            attr->inline_value[1] = MAX(-1.0f, (float)y / 1023.0f);
+            attr->inline_value[2] = MAX(-1.0f, (float)z / 511.0f);
+            break;
+        }
+    default:
+        fprintf(stderr, "Unknown vertex attribute type: 0x%x for format 0x%x\n",
+                attr->gl_type, attr->format);
+        assert(!"Unsupported attribute type");
+        break;
+    }
+}
+
 static void pgraph_bind_vertex_attributes(NV2AState *d,
                                           unsigned int min_element,
                                           unsigned int max_element,
@@ -6648,30 +6872,23 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
 
         glEnableVertexAttribArray(i);
 
-        // Carry over the attribute value from the provoking vertex to mimic
-        // hardware behavior.
         uint32_t provoking_element_index = provoking_element - min_element;
-        uint32_t element_size = attr->size * attr->count;
+        size_t element_size = attr->size * attr->count;
         assert(element_size <= sizeof(attr->inline_value));
         const uint8_t *last_entry;
 
-        if (!inline_data) {
-            last_entry = d->vram_ptr + start;
+        if (inline_data) {
+            last_entry = (uint8_t*)pg->inline_array + attr->inline_array_offset;
         } else {
-            last_entry = (uint8_t*)pg->inline_array;
-            last_entry += attr->inline_array_offset;
+            last_entry = d->vram_ptr + start;
         }
         if (stride) {
             last_entry += stride * provoking_element_index;
-            memcpy(attr->inline_value, last_entry, element_size);
         } else {
-            // Stride of 0 indicates that only the first element should be
-            // used.
-            memcpy(attr->inline_value, last_entry, element_size);
-            glDisableVertexAttribArray(i);
-            glVertexAttrib4fv(i, attr->inline_value);
-            continue;
+            last_entry += element_size * provoking_element_index;
         }
+
+        pgraph_update_inline_value(attr, last_entry);
     }
 
     NV2A_GL_DGROUP_END();

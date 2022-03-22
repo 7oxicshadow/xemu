@@ -2085,7 +2085,7 @@ static AutoUpdateWindow update_window;
 static std::deque<const char *> g_errors;
 static FPSManager fps_manager;
 
-#ifdef ENABLE_RENDERDOC
+#ifdef CONFIG_RENDERDOC
 static bool capture_renderdoc_frame = false;
 #endif
 
@@ -2250,7 +2250,7 @@ static void process_keyboard_shortcuts(void)
         monitor_window.toggle_open();
     }
 
-#ifdef ENABLE_RENDERDOC
+#if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
     if (is_key_pressed(SDL_SCANCODE_F10)) {
         nv2a_dbg_renderdoc_capture_frames(1);
     }
@@ -2333,7 +2333,7 @@ static void ShowMainMenu()
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
             ImGui::MenuItem("Audio", NULL, &apu_window.is_open);
             ImGui::MenuItem("Video", NULL, &video_window.is_open);
-#ifdef ENABLE_RENDERDOC
+#if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
             if (nv2a_dbg_renderdoc_available()) {
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &capture_renderdoc_frame);
             }
@@ -2639,7 +2639,7 @@ void xemu_hud_render(void)
     	fps_manager.Draw();
     }
 
-#ifdef ENABLE_RENDERDOC
+#if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
     if (capture_renderdoc_frame) {
         nv2a_dbg_renderdoc_capture_frames(1);
         capture_renderdoc_frame = false;
