@@ -115,10 +115,7 @@ struct decal_shader *blit;
 
 static QemuSemaphore display_init_sem;
 
-static clock_t window_resize_time = 0;
-
 static void toggle_full_screen(struct sdl2_console *scon);
-static void process_window_resize_save(void);
 
 int xemu_is_fullscreen(void)
 {
@@ -603,7 +600,6 @@ static void handle_windowevent(SDL_Event *ev)
             }
         }
         sdl2_redraw(scon);
-        window_resize_time = clock();
         break;
     case SDL_WINDOWEVENT_EXPOSED:
         sdl2_redraw(scon);
@@ -852,31 +848,10 @@ static void sdl2_display_very_early_init(DisplayOptions *o)
 #endif
                                   , xemu_version);
 
-    /* We need safe defaults as a fallback should the stored values be out
-       of range. As windowed mode is adjustable, it could be anything so
-       set it to something reasonable (320x240) */
-    #define MIN_WIN_WIDTH    ( 320 )
-    #define MIN_WIN_HEIGHT   ( 240 )
-
-    int local_ini_win_width;
-    int local_ini_win_height;
-
     // Check if the settings did not load and report to the user
     if (xemu_settings_did_fail_to_load())
     {
         fprintf(stderr, "Window Validation: Settings failed to load. Using default screen resolution\n");
-    }
-
-    // Fetch Previous window size
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WIN_WIDTH, &local_ini_win_width);
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WIN_HEIGHT, &local_ini_win_height);
-
-    // Check for sane inputs before attempting to create the window
-    if ( (local_ini_win_width < MIN_WIN_WIDTH) || (local_ini_win_width < MIN_WIN_HEIGHT) )
-    {
-        local_ini_win_width = MIN_WIN_WIDTH;
-        local_ini_win_height = MIN_WIN_HEIGHT;
-        fprintf(stderr, "Window Validation: Window width or height out of range. Forcing safe settings\n");
     }
 
     // Create main window
@@ -1596,11 +1571,6 @@ int main(int argc, char **argv)
 
     while (1) {
         sdl2_gl_refresh(&sdl2_console[0].dcl);
-        
-        //check if we need to save a new window size to the ini
-        if(window_resize_time != 0){
-            process_window_resize_save();
-        }
     }
 
     // rcu_unregister_thread();
@@ -1628,54 +1598,4 @@ void xemu_load_disc(const char *path)
                                &err);
 
     xbox_smc_update_tray_state();
-}
-
-void process_window_resize_save(void)
-{
-    /* When resizing a window the SDL_WINDOWEVENT_RESIZED is called hundreds of times
-       while dragging (on linux anyway) and we do not want to perform hundreds of writes 
-       to the ini file needlessly so the solution is to add a timer that detects when the window
-       resize has been stable for 1 second before writing */
-
-    clock_t target_timeout = window_resize_time + CLOCKS_PER_SEC;
-    clock_t current_time = clock();
-    clock_t delta_time = current_time - target_timeout;
-
-    /* check that we have exceeded the specified timeout or if we have had
-       a potential wrap around */
-    if((delta_time > 0) || (delta_time < -CLOCKS_PER_SEC)){
-        
-        //check that we are not currently full screen
-        if (!xemu_is_fullscreen())
-        {
-            int win_w;
-            int win_h;
-            int stored_win_w;
-            int stored_win_h;
-
-            //get the current window dimensions
-            SDL_GetWindowSize(m_window, &win_w, &win_h);
-
-            //get the previously stored dimensions
-            xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WIN_WIDTH, &stored_win_w);
-            xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WIN_HEIGHT, &stored_win_h);
-
-            /* Check that the values are different than previous, this will stop
-               writes when switching from fullscreen back to windowed mode */
-            if((win_w != stored_win_w) || (win_h != stored_win_h))
-            {
-                //set the ini variables
-                xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_WIN_WIDTH, win_w);
-                xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_WIN_HEIGHT, win_h);
-                
-                //save the changes
-                xemu_settings_save();
-
-                //printf("%d %d %d %d\n", win_w, win_h, stored_win_w, stored_win_h);
-            }
-        }
-        
-        //Reset the resize timer ready for the next event
-        window_resize_time = 0;
-    }
 }
