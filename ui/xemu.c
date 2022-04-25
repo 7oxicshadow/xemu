@@ -110,7 +110,6 @@ static SDL_Cursor *guest_sprite;
 static Notifier mouse_mode_notifier;
 static SDL_Window *m_window;
 static SDL_GLContext m_context;
-int scaling_mode = 1;
 struct decal_shader *blit;
 
 static QemuSemaphore display_init_sem;
@@ -595,8 +594,8 @@ static void handle_windowevent(SDL_Event *ev)
             dpy_set_ui_info(scon->dcl.con, &info);
 
             if (!gui_fullscreen) {
-                xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_WINDOW_WIDTH, ev->window.data1);
-                xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_WINDOW_HEIGHT, ev->window.data2);
+                g_config.display.window.last_width = ev->window.data1;
+                g_config.display.window.last_height = ev->window.data2;
             }
         }
         sdl2_redraw(scon);
@@ -868,9 +867,8 @@ static void sdl2_display_very_early_init(DisplayOptions *o)
     SDL_DisplayMode disp_mode;
     SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(m_window), &disp_mode);
 
-    int win_w, win_h;
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WINDOW_WIDTH, &win_w);
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_WINDOW_HEIGHT, &win_h);
+    int win_w = g_config.display.window.last_width,
+        win_h = g_config.display.window.last_height;
 
     if (win_w > 0 && win_h > 0) {
         if (disp_mode.w >= win_w && disp_mode.h >= win_h) {
@@ -945,8 +943,6 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
 
     assert(o->type == DISPLAY_TYPE_XEMU);
     SDL_GL_MakeCurrent(m_window, m_context);
-
-    xemu_settings_get_enum(XEMU_SETTINGS_DISPLAY_SCALE, &scaling_mode);
 
     memset(&info, 0, sizeof(info));
     SDL_VERSION(&info.version);
@@ -1185,20 +1181,20 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
 
     // Calculate scaling factors
     float scale[2];
-    if (scaling_mode == DISPLAY_SCALE_STRETCH) {
+    if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_STRETCH) {
         // Stretch to fit
         scale[0] = 1.0;
         scale[1] = 1.0;
-    } else if (scaling_mode == DISPLAY_SCALE_CENTER) {
+    } else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_CENTER) {
         // Centered
         scale[0] = (float)tw/(float)ww;
         scale[1] = (float)th/(float)wh;
     } else {
         float t_ratio;
-        if (scaling_mode == DISPLAY_SCALE_WS169) {
+        if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_16_9) {
             // Scale to fit window using a fixed 16:9 aspect ratio
             t_ratio = 16.0f/9.0f;
-        } else if (scaling_mode == DISPLAY_SCALE_FS43) {
+        } else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_4_3) {
             t_ratio = 4.0f/3.0f;
         } else if (scaling_mode == DISPLAY_SCALE_CUSTOM) {
             const char *tmp;
@@ -1551,7 +1547,15 @@ int main(int argc, char **argv)
         }
     }
 
-    xemu_settings_load();
+    if (!xemu_settings_load()) {
+        const char *err_msg = xemu_settings_get_error_message();
+        fprintf(stderr, "%s", err_msg);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+            "Failed to load xemu config file", err_msg,
+            m_window);
+        SDL_Quit();
+        exit(1);
+    }
 
     atexit(xemu_settings_save);
 
@@ -1579,6 +1583,12 @@ int main(int argc, char **argv)
     qemu_set_current_aio_context(qemu_get_aio_context());
 
     DPRINTF("Main thread: initializing app\n");
+
+    qemu_mutex_lock_main_loop();
+    qemu_mutex_lock_iothread();
+    xemu_input_init();
+    qemu_mutex_unlock_iothread();
+    qemu_mutex_unlock_main_loop();
 
     while (1) {
         sdl2_gl_refresh(&sdl2_console[0].dcl);

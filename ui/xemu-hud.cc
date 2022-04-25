@@ -791,17 +791,12 @@ private:
     bool dirty;
     bool pending_restart;
 
-    char flash_path[MAX_STRING_LEN];
+    char flashrom_path[MAX_STRING_LEN];
     char bootrom_path[MAX_STRING_LEN];
     char hdd_path[MAX_STRING_LEN];
     char eeprom_path[MAX_STRING_LEN];
     char xmu1_path[MAX_STRING_LEN];
     char xmu2_path[MAX_STRING_LEN];
-    int  memory_idx;
-    bool short_animation;
-#if defined(_WIN32)
-    bool check_for_update;
-#endif
 
 public:
     SettingsWindow()
@@ -810,12 +805,10 @@ public:
         dirty = false;
         pending_restart = false;
 
-        flash_path[0] = '\0';
+        flashrom_path[0] = '\0';
         bootrom_path[0] = '\0';
         hdd_path[0] = '\0';
         eeprom_path[0] = '\0';
-        memory_idx = 0;
-        short_animation = false;
     }
 
     ~SettingsWindow()
@@ -824,30 +817,6 @@ public:
 
     void Load()
     {
-        const char *tmp;
-        int tmp_int;
-        size_t len;
-
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_FLASH_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(flash_path, tmp, sizeof(flash_path));
-
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_BOOTROM_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(bootrom_path, tmp, sizeof(bootrom_path));
-
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_HDD_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(hdd_path, tmp, sizeof(hdd_path));
-
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_EEPROM_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(eeprom_path, tmp, sizeof(eeprom_path));
-
         xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, &tmp);
         len = strlen(tmp);
         assert(len < MAX_STRING_LEN);
@@ -858,36 +827,25 @@ public:
         assert(len < MAX_STRING_LEN);
         strncpy(xmu2_path, tmp, sizeof(xmu2_path));
 
-        xemu_settings_get_int(XEMU_SETTINGS_SYSTEM_MEMORY, &tmp_int);
-        memory_idx = (tmp_int-64)/64;
-
-        xemu_settings_get_bool(XEMU_SETTINGS_SYSTEM_SHORTANIM, &tmp_int);
-        short_animation = !!tmp_int;
-
-#if defined(_WIN32)
-        xemu_settings_get_bool(XEMU_SETTINGS_MISC_CHECK_FOR_UPDATE, &tmp_int);
-        check_for_update = !!tmp_int;
-#endif
+        strncpy(flashrom_path, g_config.sys.files.flashrom_path, sizeof(flashrom_path)-1);
+        strncpy(bootrom_path, g_config.sys.files.bootrom_path, sizeof(bootrom_path)-1);
+        strncpy(hdd_path, g_config.sys.files.hdd_path, sizeof(hdd_path)-1);
+        strncpy(eeprom_path, g_config.sys.files.eeprom_path, sizeof(eeprom_path)-1);
 
         dirty = false;
     }
 
     void Save()
     {
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_FLASH_PATH, flash_path);
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_BOOTROM_PATH, bootrom_path);
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_HDD_PATH, hdd_path);
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_EEPROM_PATH, eeprom_path);
         xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, xmu1_path);
         xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, xmu2_path);
-        xemu_settings_set_int(XEMU_SETTINGS_SYSTEM_MEMORY, 64+memory_idx*64);
-        xemu_settings_set_bool(XEMU_SETTINGS_SYSTEM_SHORTANIM, short_animation);
-#if defined(_WIN32)
-        xemu_settings_set_bool(XEMU_SETTINGS_MISC_CHECK_FOR_UPDATE, check_for_update);
-#endif
-        xemu_settings_save();
-        xemu_queue_notification("Settings saved! Restart to apply updates.");
+        xemu_settings_set_string(&g_config.sys.files.flashrom_path, flashrom_path);
+        xemu_settings_set_string(&g_config.sys.files.bootrom_path, bootrom_path);
+        xemu_settings_set_string(&g_config.sys.files.hdd_path, hdd_path);
+        xemu_settings_set_string(&g_config.sys.files.eeprom_path, eeprom_path);
+        xemu_queue_notification("Settings saved. Restart to apply updates.");
         pending_restart = true;
+        g_config.general.show_welcome = false;
     }
 
     void FilePicker(const char *name, char *buf, size_t len, const char *filters)
@@ -933,7 +891,7 @@ public:
         ImGui::NextColumn();
         float picker_width = ImGui::GetColumnWidth()-120*g_ui_scale;
         ImGui::SetNextItemWidth(picker_width);
-        FilePicker("###Flash", flash_path, sizeof(flash_path), rom_file_filters);
+        FilePicker("###Flash", flashrom_path, sizeof(flashrom_path), rom_file_filters);
         ImGui::NextColumn();
 
         ImGui::Text("MCPX Boot ROM File");
@@ -969,24 +927,18 @@ public:
         ImGui::Text("System Memory");
         ImGui::NextColumn();
         ImGui::SetNextItemWidth(ImGui::GetColumnWidth()*0.5);
-        if (ImGui::Combo("###mem", &memory_idx, "64 MiB\0" "128 MiB\0")) {
-            dirty = true;
-        }
+        ImGui::Combo("###mem", &g_config.sys.mem_limit, "64 MiB\0" "128 MiB\0");
         ImGui::NextColumn();
 
         ImGui::Dummy(ImVec2(0,0));
         ImGui::NextColumn();
-        if (ImGui::Checkbox("Skip startup animation", &short_animation)) {
-            dirty = true;
-        }
+        ImGui::Checkbox("Skip startup animation", &g_config.general.misc.skip_boot_anim);
         ImGui::NextColumn();
 
 #if defined(_WIN32)
         ImGui::Dummy(ImVec2(0,0));
         ImGui::NextColumn();
-        if (ImGui::Checkbox("Check for updates on startup", &check_for_update)) {
-            dirty = true;
-        }
+        ImGui::Checkbox("Check for updates on startup", &g_config.general.updates.check);
         ImGui::NextColumn();
 #endif
 
@@ -1129,14 +1081,11 @@ class NetworkInterfaceManager
 public:
     std::vector<std::unique_ptr<NetworkInterface>> ifaces;
     NetworkInterface *current_iface;
-    const char *current_iface_name;
     bool failed_to_load_lib;
 
     NetworkInterfaceManager()
     {
         current_iface = NULL;
-        xemu_settings_get_string(XEMU_SETTINGS_NETWORK_PCAP_INTERFACE,
-                                 &current_iface_name);
         failed_to_load_lib = false;
     }
 
@@ -1173,7 +1122,7 @@ public:
 #else
             ifaces.emplace_back(new NetworkInterface(iter));
 #endif
-            if (!strcmp(current_iface_name, iter->name)) {
+            if (!strcmp(g_config.net.pcap.netif, iter->name)) {
                 current_iface = ifaces.back().get();
             }
         }
@@ -1184,10 +1133,8 @@ public:
     void select(NetworkInterface &iface)
     {
         current_iface = &iface;
-        xemu_settings_set_string(XEMU_SETTINGS_NETWORK_PCAP_INTERFACE,
+        xemu_settings_set_string(&g_config.net.pcap.netif,
                                  iface.pcap_name.c_str());
-        xemu_settings_get_string(XEMU_SETTINGS_NETWORK_PCAP_INTERFACE,
-                                 &current_iface_name);
     }
 
     bool is_current(NetworkInterface &iface)
@@ -1201,7 +1148,6 @@ class NetworkWindow
 {
 public:
     bool is_open;
-    int  backend;
     char remote_addr[64];
     char local_addr[64];
     std::unique_ptr<NetworkInterfaceManager> iface_mgr;
@@ -1226,12 +1172,8 @@ public:
         }
 
         if (ImGui::IsWindowAppearing()) {
-            const char *tmp;
-            xemu_settings_get_string(XEMU_SETTINGS_NETWORK_REMOTE_ADDR, &tmp);
-            strncpy(remote_addr, tmp, sizeof(remote_addr)-1);
-            xemu_settings_get_string(XEMU_SETTINGS_NETWORK_LOCAL_ADDR, &tmp);
-            strncpy(local_addr, tmp, sizeof(local_addr)-1);
-            xemu_settings_get_enum(XEMU_SETTINGS_NETWORK_BACKEND, &backend);
+            strncpy(remote_addr, g_config.net.udp.remote_addr, sizeof(remote_addr)-1);
+            strncpy(local_addr, g_config.net.udp.bind_addr, sizeof(local_addr)-1);
         }
 
         ImGuiInputTextFlags flg = 0;
@@ -1247,23 +1189,20 @@ public:
         ImGui::SameLine(); HelpMarker("The network backend which the emulated NIC interacts with");
         ImGui::NextColumn();
         if (is_enabled) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
-        int temp_backend = backend; // Temporary to make backend combo read-only (FIXME: surely there's a nicer way)
-        if (ImGui::Combo("##backend", is_enabled ? &temp_backend : &backend, "NAT\0UDP Tunnel\0Bridged Adapter\0") && !is_enabled) {
-            xemu_settings_set_enum(XEMU_SETTINGS_NETWORK_BACKEND, backend);
-            xemu_settings_save();
-        }
+        int temp_backend = g_config.net.backend; // Temporary to make backend combo read-only (FIXME: surely there's a nicer way)
+        ImGui::Combo("##backend", is_enabled ? &temp_backend : &g_config.net.backend, "NAT\0UDP Tunnel\0Bridged Adapter\0");
         if (is_enabled) ImGui::PopStyleVar();
         ImGui::SameLine();
-        if (backend == XEMU_NET_BACKEND_USER) {
+        if (g_config.net.backend == CONFIG_NET_BACKEND_NAT) {
             HelpMarker("User-mode TCP/IP stack with network address translation");
-        } else if (backend == XEMU_NET_BACKEND_SOCKET_UDP) {
+        } else if (g_config.net.backend == CONFIG_NET_BACKEND_UDP) {
             HelpMarker("Tunnels link-layer traffic to a remote host via UDP");
-        } else if (backend == XEMU_NET_BACKEND_PCAP) {
+        } else if (g_config.net.backend == CONFIG_NET_BACKEND_PCAP) {
             HelpMarker("Bridges with a host network interface");
         }
         ImGui::NextColumn();
 
-        if (backend == XEMU_NET_BACKEND_SOCKET_UDP) {
+        if (g_config.net.backend == CONFIG_NET_BACKEND_UDP) {
             ImGui::Text("Remote Host");
             ImGui::SameLine(); HelpMarker("The remote <IP address>:<Port> to forward packets to (e.g. 1.2.3.4:9368)");
             ImGui::NextColumn();
@@ -1282,7 +1221,7 @@ public:
             ImGui::InputText("###local_host", local_addr, sizeof(local_addr), flg);
             if (is_enabled) ImGui::PopStyleVar();
             ImGui::NextColumn();
-        } else if (backend == XEMU_NET_BACKEND_PCAP) {
+        } else if (g_config.net.backend == CONFIG_NET_BACKEND_PCAP) {
             static bool should_refresh = true;
             if (iface_mgr.get() == nullptr) {
                 iface_mgr.reset(new NetworkInterfaceManager());
@@ -1314,7 +1253,7 @@ public:
                 const char *selected_display_name = (
                     iface_mgr->current_iface
                     ? iface_mgr->current_iface->friendlyname.c_str()
-                    : iface_mgr->current_iface_name
+                    : g_config.net.pcap.netif
                     );
                 if (is_enabled) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
                 if (ImGui::BeginCombo("###network_iface", selected_display_name)) {
@@ -1355,22 +1294,22 @@ public:
         ImGui::SetItemDefaultFocus();
         if (ImGui::Button(is_enabled ? "Disable" : "Enable", ImVec2(120*g_ui_scale, 0))) {
             if (!is_enabled) {
-                xemu_settings_set_string(XEMU_SETTINGS_NETWORK_REMOTE_ADDR, remote_addr);
-                xemu_settings_set_string(XEMU_SETTINGS_NETWORK_LOCAL_ADDR, local_addr);
+                xemu_settings_set_string(&g_config.net.udp.remote_addr, remote_addr);
+                xemu_settings_set_string(&g_config.net.udp.bind_addr, local_addr);
                 xemu_net_enable();
             } else {
                 xemu_net_disable();
             }
-            xemu_settings_set_bool(XEMU_SETTINGS_NETWORK_ENABLED, xemu_net_is_enabled());
-            xemu_settings_save();
         }
 
         ImGui::End();
     }
 };
 
+#ifndef _WIN32
 #ifdef CONFIG_CPUID_H
 #include <cpuid.h>
+#endif
 #endif
 
 const char *get_cpu_info(void)
@@ -1474,10 +1413,7 @@ public:
             description[0] = '\x00';
             report.compat_comments = description;
 
-            const char *tmp;
-            xemu_settings_get_string(XEMU_SETTINGS_MISC_USER_TOKEN, &tmp);
-            assert(strlen(tmp) < sizeof(token_buf));
-            strncpy(token_buf, tmp, sizeof(token_buf));
+            strncpy(token_buf, g_config.general.user_token, sizeof(token_buf)-1);
             report.token = token_buf;
 
             dirty = true;
@@ -1595,12 +1531,8 @@ public:
             did_send = true;
             send_result = report.Send();
             if (send_result) {
-                // Close window on success
                 is_open = false;
-
-                // Save user token if it was used
-                xemu_settings_set_string(XEMU_SETTINGS_MISC_USER_TOKEN, token_buf);
-                xemu_settings_save();
+                xemu_settings_set_string(&g_config.general.user_token, token_buf);
             }
         }
 
@@ -1944,47 +1876,14 @@ protected:
 
 public:
     bool is_open;
-    bool should_prompt_auto_update_selection;
 
     AutoUpdateWindow()
     {
         is_open = false;
-        should_prompt_auto_update_selection = false;
     }
 
     ~AutoUpdateWindow()
     {
-    }
-
-    void save_auto_update_selection(bool preference)
-    {
-        xemu_settings_set_bool(XEMU_SETTINGS_MISC_CHECK_FOR_UPDATE, preference);
-        xemu_settings_save();
-        should_prompt_auto_update_selection = false;
-    }
-
-    void prompt_auto_update_selection()
-    {
-        ImGui::Text("Would you like xemu to check for updates on startup?");
-        ImGui::SetNextItemWidth(-1.0f);
-
-        ImGui::Dummy(ImVec2(0.0f, ImGui::GetStyle().WindowPadding.y));
-        ImGui::Separator();
-        ImGui::Dummy(ImVec2(0.0f, ImGui::GetStyle().WindowPadding.y));
-
-        float w = (130)*g_ui_scale;
-        float bw = w + (10)*g_ui_scale;
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth()-2*bw);
-
-        if (ImGui::Button("No", ImVec2(w, 0))) {
-            save_auto_update_selection(false);
-            is_open = false;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Yes", ImVec2(w, 0))) {
-            save_auto_update_selection(true);
-            check_for_updates_and_prompt_if_available();
-        }
     }
 
     void check_for_updates_and_prompt_if_available()
@@ -1999,12 +1898,6 @@ public:
         if (!is_open) return;
         ImGui::SetNextWindowContentSize(ImVec2(550.0f*g_ui_scale, 0.0f));
         if (!ImGui::Begin("Update", &is_open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::End();
-            return;
-        }
-
-        if (should_prompt_auto_update_selection) {
-            prompt_auto_update_selection();
             ImGui::End();
             return;
         }
@@ -2178,23 +2071,19 @@ static bool is_shortcut_key_pressed(int scancode)
 
 static void action_eject_disc(void)
 {
-    xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_DVD_PATH, "");
-    xemu_settings_save();
+    xemu_settings_set_string(&g_config.sys.files.dvd_path, "");
     xemu_eject_disc();
 }
 
 static void action_load_disc(void)
 {
     const char *iso_file_filters = ".iso Files\0*.iso\0All Files\0*.*\0";
-    const char *current_disc_path;
-    xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_DVD_PATH, &current_disc_path);
-    const char *new_disc_path = paused_file_open(NOC_FILE_DIALOG_OPEN, iso_file_filters, current_disc_path, NULL);
+    const char *new_disc_path = paused_file_open(NOC_FILE_DIALOG_OPEN, iso_file_filters, g_config.sys.files.dvd_path, NULL);
     if (new_disc_path == NULL) {
         /* Cancelled */
         return;
     }
-    xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_DVD_PATH, new_disc_path);
-    xemu_settings_save();
+    xemu_settings_set_string(&g_config.sys.files.dvd_path, new_disc_path);
     xemu_load_disc(new_disc_path);
 }
 
@@ -2305,8 +2194,7 @@ static void ShowMainMenu()
             if (ui_scale_combo > 1) ui_scale_combo = 1;
             if (ImGui::Combo("UI Scale", &ui_scale_combo, "1x\0" "2x\0")) {
                 g_ui_scale = ui_scale_combo + 1;
-                xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_UI_SCALE, g_ui_scale);
-                xemu_settings_save();
+                g_config.display.ui.scale = g_ui_scale;
                 g_trigger_style_update = true;
             }
 
@@ -2316,9 +2204,7 @@ static void ShowMainMenu()
             }
 
             if (ImGui::Combo(
-                    "Scaling Mode", &scaling_mode, "Center\0Scale\0Scale (Widescreen 16:9)\0Scale (4:3)\0Scale (Custom)\0Stretch\0")) {
-                xemu_settings_set_enum(XEMU_SETTINGS_DISPLAY_SCALE, scaling_mode);
-                xemu_settings_save();
+                    "Scaling Mode", &g_config.display.ui.fit, "Center\0Scale\0Scale (Widescreen 16:9)\0Scale (4:3)\0Scale (Custom)\0Stretch\0")) {
             }
             ImGui::SameLine(); HelpMarker("Controls how the rendered content should be scaled into the window");
             if (ImGui::MenuItem("Fullscreen", SHORTCUT_MENU_TEXT(Alt+F), xemu_is_fullscreen(), true)) {
@@ -2483,10 +2369,9 @@ void xemu_hud_init(SDL_Window* window, void* sdl_gl_context)
     ImGui_ImplSDL2_InitForOpenGL(window, sdl_gl_context);
     ImGui_ImplOpenGL3_Init("#version 150");
 
-    first_boot_window.is_open = xemu_settings_did_fail_to_load();
+    first_boot_window.is_open = g_config.general.show_welcome;
 
-    int ui_scale_int = 1;
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_UI_SCALE, &ui_scale_int);
+    int ui_scale_int = g_config.display.ui.scale;
     if (ui_scale_int < 1) ui_scale_int = 1;
     g_ui_scale = ui_scale_int;
 
@@ -2495,13 +2380,7 @@ void xemu_hud_init(SDL_Window* window, void* sdl_gl_context)
     ImPlot::CreateContext();
 
 #if defined(_WIN32)
-    int should_check_for_update;
-    xemu_settings_get_bool(XEMU_SETTINGS_MISC_CHECK_FOR_UPDATE, &should_check_for_update);
-    if (should_check_for_update == -1) {
-        update_window.should_prompt_auto_update_selection =
-            update_window.is_open = !xemu_settings_did_fail_to_load();
-
-    } else if (should_check_for_update) {
+    if (!g_config.general.show_welcome && g_config.general.updates.check) {
         update_window.check_for_updates_and_prompt_if_available();
     }
 #endif

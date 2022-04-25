@@ -3711,9 +3711,7 @@ void nv2a_set_surface_scale_factor(unsigned int scale)
 {
     NV2AState *d = g_nv2a;
 
-    xemu_settings_set_int(XEMU_SETTINGS_DISPLAY_RENDER_SCALE,
-                          scale < 1 ? 1 : scale);
-    xemu_settings_save();
+    g_config.display.quality.surface_scale = scale < 1 ? 1 : scale;
 
     qemu_mutex_unlock_iothread();
 
@@ -3754,8 +3752,7 @@ unsigned int nv2a_get_surface_scale_factor(void)
 
 static void pgraph_reload_surface_scale_factor(NV2AState *d)
 {
-    int factor;
-    xemu_settings_get_int(XEMU_SETTINGS_DISPLAY_RENDER_SCALE, &factor);
+    int factor = g_config.display.quality.surface_scale;
     d->pgraph.surface_scale_factor = factor < 1 ? 1 : factor;
 }
 
@@ -6123,9 +6120,9 @@ static void pgraph_update_surface(NV2AState *d, bool upload,
     pg->surface_shape.z_format = GET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
                                           NV_PGRAPH_SETUPRASTER_Z_FORMAT);
 
-    /* FIXME: Does this apply to CLEARs too? */
-    color_write = color_write && pgraph_color_write_enabled(pg);
-    zeta_write = zeta_write && pgraph_zeta_write_enabled(pg);
+    color_write = color_write &&
+            (pg->clearing || pgraph_color_write_enabled(pg));
+    zeta_write = zeta_write && (pg->clearing || pgraph_zeta_write_enabled(pg));
 
     if (upload) {
         bool fb_dirty = pgraph_framebuffer_dirty(pg);
