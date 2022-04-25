@@ -2244,7 +2244,7 @@ void hmp_showfps(Monitor *mon, const QDict *qdict)
         value = 0;
     }
 
-    xemu_settings_set_bool(XEMU_SETTINGS_DISPLAY_SHOW_FPS, value);
+    g_config.display.ui.ui_show_fps_bool = value;
     xemu_settings_save();
 }
 
@@ -2256,13 +2256,12 @@ void hmp_customratio(Monitor *mon, const QDict *qdict)
     if( strtof(value, NULL) == 0.0f )
     {
         /* Invalid conversion, force 4:3 */
-        xemu_settings_set_string(XEMU_SETTINGS_DISPLAY_CUSTOM_RATIO, "1.333333333");
+        xemu_settings_set_string(&g_config.display.ui.custom_ratio, "1.333333333");
     }
     else
     {
-        xemu_settings_set_string(XEMU_SETTINGS_DISPLAY_CUSTOM_RATIO, value);
+        xemu_settings_set_string(&g_config.display.ui.custom_ratio, value);
     }
-
 
     xemu_settings_save();
 }

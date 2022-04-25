@@ -208,8 +208,6 @@ static void update_output(USBXIDState *s)
 
 static void update_input(USBXIDState *s)
 {
-    int ana_dig_setting = 0;
-
     if (xemu_input_get_test_mode()) {
         // Don't report changes if we are testing the controller while running
         return;
@@ -239,11 +237,9 @@ static void update_input(USBXIDState *s)
         { GAMEPAD_DPAD_RIGHT,  CONTROLLER_BUTTON_DPAD_RIGHT },
     };
 
-    xemu_settings_get_bool(XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH, &ana_dig_setting);
-
     for (int i = 0; i < 6; i++) {
         int pressed = state->buttons & button_map_analog[i][1];
-        if (ana_dig_setting == FALSE)
+        if (g_config.input.switches.ana_dig_switch == FALSE)
             s->in_state.bAnalogButtons[button_map_analog[i][0]] = pressed ? 0xff : 0;
         else
             s->in_state.bAnalogButtons[button_map_analog[i][0]] = pressed ? state->button_ana[i] : 0;

@@ -35,6 +35,9 @@
 
 #include "monitor/monitor-internal.h"
 
+/* prototypes */
+int calculate_range_output(int input, int start, int stop);
+
 // #define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
@@ -341,7 +344,6 @@ void xemu_input_update_sdl_kbd_controller_state(ControllerState *state)
 void xemu_input_update_sdl_controller_state(ControllerState *state)
 {
     int temp = 0;
-
     state->buttons = 0;
     memset(state->axis, 0, sizeof(state->axis));
 
@@ -389,7 +391,7 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
             if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
                 y = 4;
 
-            xemu_settings_get_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, &temp);
+            temp = g_config.input.switches.ana_btn_tpf;
 
             if((local_buttonana_a[y] < 0xFF) && buttonstate)
                 if((local_buttonana_a[y] + temp) < 255U)
@@ -427,15 +429,39 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
 
     int JOYSTICK_LEFT_DEAD_ZONE = 0;
     int JOYSTICK_RIGHT_DEAD_ZONE = 0;
+    int joy_offset;
 
     if (state->bound >= 0){
 
-        temp = 0;
+        switch(state->bound)
+        {
+            case 0:
+                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_1_lsdz * MAX_INPUT_RANGE) / 100;
+                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_1_rsdz * MAX_INPUT_RANGE) / 100;
+                joy_offset = g_config.input.switches.joy_start_offset_ctrl_1;
+            break;
 
-        xemu_settings_get_int(deadzone_map[state->bound].lstick, &temp);
-        JOYSTICK_LEFT_DEAD_ZONE = (temp * MAX_INPUT_RANGE) / 100;
-        xemu_settings_get_int(deadzone_map[state->bound].rstick, &temp);
-        JOYSTICK_RIGHT_DEAD_ZONE = (temp * MAX_INPUT_RANGE) / 100;
+            case 1:
+                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_2_lsdz * MAX_INPUT_RANGE) / 100;
+                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_2_rsdz * MAX_INPUT_RANGE) / 100;
+                joy_offset = g_config.input.switches.joy_start_offset_ctrl_2;
+            break;
+
+            case 2:
+                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_3_lsdz * MAX_INPUT_RANGE) / 100;
+                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_3_rsdz * MAX_INPUT_RANGE) / 100;
+                joy_offset = g_config.input.switches.joy_start_offset_ctrl_3;
+            break;
+
+            case 3:
+                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_4_lsdz * MAX_INPUT_RANGE) / 100;
+                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_4_rsdz * MAX_INPUT_RANGE) / 100;
+                joy_offset = g_config.input.switches.joy_start_offset_ctrl_4;
+            break;
+
+            default:
+            break;
+        }
 
         //printf("%d\n", JOYSTICK_LEFT_DEAD_ZONE);
 
@@ -454,8 +480,6 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
     }
 
     //#define OFFSET    (10000)
-    int joy_offset;
-    xemu_settings_get_int(XEMU_SETTINGS_INPUT_JOY_START_OFFSET_CTRL_1, &joy_offset);
 
     int lstickx = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_X], joy_offset, MAX_INPUT_RANGE );
     int lsticky = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_Y], joy_offset, MAX_INPUT_RANGE );
@@ -497,11 +521,7 @@ int calculate_range_output(int input, int start, int stop)
 
 void xemu_input_update_rumble(ControllerState *state)
 {
-    int rumble_setting = false;
-
-    xemu_settings_get_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, &rumble_setting);
-
-    if ( (!state->rumble_enabled) || (rumble_setting == true)) {
+    if ( (!state->rumble_enabled) || (g_config.input.switches.input_disable_rumble == true)) {
         return;
     }
 
@@ -618,7 +638,6 @@ int xemu_input_get_test_mode(void)
 
 void xemu_mount_xmu(int card)
 {
-    const char *tmp;
     char xmu1_cmd[250] = "drive_add 0 if=none,id=usbdisk1,file=";
     char xmu2_cmd[250] = "drive_add 0 if=none,id=usbdisk2,file=";
     FILE *file;
@@ -631,11 +650,9 @@ void xemu_mount_xmu(int card)
         {
             if(card == 1U)
             {
-                xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, &tmp);
-
-                if (file = fopen(tmp, "r")) {
+                if (file = fopen(g_config.sys.files.xmu1_path, "r")) {
                     fclose(file);
-                    strcat(xmu1_cmd,tmp);
+                    strcat(xmu1_cmd, g_config.sys.files.xmu1_path);
                     handle_hmp_command(0, xmu1_cmd);
                     handle_hmp_command(0, "stop");
                     handle_hmp_command(0, "device_add usb-storage,drive=usbdisk1,port=1.3.2");
@@ -649,12 +666,10 @@ void xemu_mount_xmu(int card)
 
             }
             else if(card == 2U)
-            {
-                xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, &tmp);
-                
-                if (file = fopen(tmp, "r")) {
+            {                
+                if (file = fopen(g_config.sys.files.xmu2_path, "r")) {
                     fclose(file);
-                    strcat(xmu2_cmd,tmp);
+                    strcat(xmu2_cmd, g_config.sys.files.xmu2_path);
                     handle_hmp_command(0, xmu2_cmd);
                     handle_hmp_command(0, "stop");
                     handle_hmp_command(0, "device_add usb-storage,drive=usbdisk2,port=1.3.3");

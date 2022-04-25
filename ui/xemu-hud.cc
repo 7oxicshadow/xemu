@@ -629,13 +629,9 @@ public:
         static bool init = false;
 
         if (!init){
-            int tmpint;
-            xemu_settings_get_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, &tmpint);
-            rumble_switch = (bool)tmpint;
 
-            xemu_settings_get_bool(XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH, &tmpint);
-            ana_dig_setting = (bool)tmpint;
-
+            rumble_switch = g_config.input.switches.input_disable_rumble;
+            ana_dig_setting = g_config.input.switches.ana_dig_switch;
             init = true;
         }
 
@@ -646,7 +642,7 @@ public:
             ImGui::NextColumn();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
             if (ImGui::Checkbox("Global Disable Rumble", &rumble_switch)) {
-                xemu_settings_set_bool(XEMU_SETTINGS_INPUT_DISABLE_RUMBLE, rumble_switch);
+                g_config.input.switches.input_disable_rumble = rumble_switch;
                 xemu_settings_save();
             }
             ImGui::NextColumn();
@@ -655,7 +651,7 @@ public:
             ImGui::PushItemWidth(170*g_ui_scale);
             ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
             if (ImGui::Checkbox("Enable Analog Btns", &ana_dig_setting)) {
-                xemu_settings_set_bool(XEMU_SETTINGS_INPUT_ANA_DIG_SWITCH, ana_dig_setting);
+                g_config.input.switches.ana_dig_switch = ana_dig_setting;
                 xemu_settings_save();
             }
             ImGui::PopItemWidth();
@@ -667,9 +663,9 @@ public:
                 
                 ImGui::PushItemWidth(85*g_ui_scale);
                 static int ana_dig_tpf = 0;
-                xemu_settings_get_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, &ana_dig_tpf);
+                ana_dig_tpf = g_config.input.switches.ana_btn_tpf;
                 if (ImGui::SliderInt("Ticks", &ana_dig_tpf, 0, 20, 0, ImGuiSliderFlags_ClampOnInput)){
-                    xemu_settings_set_int(XEMU_SETTINGS_INPUT_ANA_BUTTON_TPF, ana_dig_tpf);
+                    g_config.input.switches.ana_btn_tpf = ana_dig_tpf;
                     xemu_settings_save();
                 }
                 ImGui::PopItemWidth();
@@ -682,37 +678,67 @@ public:
             /*const char* items[] = { "0", "5", "10", "15", "20", "25", "30", "35", "40", "45", "50", 
                                     "55", "60", "65", "70", "75", "80", "85", "90", "95", "100" };*/
             
-            static int lstick_deadzone = 0;
-            static int rstick_deadzone = 0;
-            static int stick_offset = 0;
+            int * lstick_dz_ptr = 0;
+            int * rstick_dz_ptr = 0;
+            int * stick_offset_ptr = 0;
+ 
+            switch (bound_state->bound)
+            {
+                case 0:
+                    lstick_dz_ptr = &g_config.input.switches.controller_1_lsdz;
+                    rstick_dz_ptr = &g_config.input.switches.controller_1_rsdz;
+                    stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_1;
+                break;
 
+                case 2:
+                    lstick_dz_ptr = &g_config.input.switches.controller_2_lsdz;
+                    rstick_dz_ptr = &g_config.input.switches.controller_2_rsdz;
+                    stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_2;
+                break;
 
-            //printf("%d\n", bound_state->bound);
-            xemu_settings_get_int(deadzone_map[bound_state->bound].lstick, &lstick_deadzone);
-            xemu_settings_get_int(deadzone_map[bound_state->bound].rstick, &rstick_deadzone);
-            xemu_settings_get_int(stick_offset_map[bound_state->bound], &stick_offset);
+                case 3:
+                    lstick_dz_ptr = &g_config.input.switches.controller_3_lsdz;
+                    rstick_dz_ptr = &g_config.input.switches.controller_3_rsdz;
+                    stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_3;
+                break;
 
+                case 4:
+                    lstick_dz_ptr = &g_config.input.switches.controller_4_lsdz;
+                    rstick_dz_ptr = &g_config.input.switches.controller_4_rsdz;
+                    stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_4;
+                break;
+
+                default:
+                break;
+            }
 
             //if (ImGui::Combo("LStick Deadzone", &lstick_deadzone, items, IM_ARRAYSIZE(items))) {
-            if (ImGui::SliderInt("LStick Deadzone (%)", &lstick_deadzone, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
-                xemu_settings_set_int(deadzone_map[bound_state->bound].lstick, lstick_deadzone);
-                xemu_settings_save();
-            }
-            ImGui::NextColumn();
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
-            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
-            if (ImGui::SliderInt("RStick Deadzone (%)", &rstick_deadzone, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
-                xemu_settings_set_int(deadzone_map[bound_state->bound].rstick, rstick_deadzone);
-                xemu_settings_save();
-            }
-            ImGui::NextColumn();
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
-            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
-            if (ImGui::SliderInt("Stick Start Offset (0 - 32767)", &stick_offset, 0, 32767, 0, ImGuiSliderFlags_ClampOnInput)){
-                xemu_settings_set_int(stick_offset_map[bound_state->bound], stick_offset);
-                xemu_settings_save();
+            if( NULL != lstick_dz_ptr )
+            {
+                if (ImGui::SliderInt("LStick Deadzone (%)", lstick_dz_ptr, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
+                    xemu_settings_save();
+                }
             }
 
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
+            if( NULL != rstick_dz_ptr )
+            {            
+                if (ImGui::SliderInt("RStick Deadzone (%)", rstick_dz_ptr, 0, 100, 0, ImGuiSliderFlags_ClampOnInput)){
+                    xemu_settings_save();
+                }
+            }
+
+            ImGui::NextColumn();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(int)((ImGui::GetColumnWidth()-controller_width*g_ui_scale)/2.0));
+            //if (ImGui::Combo("RStick Deadzone", &rstick_deadzone, items, IM_ARRAYSIZE(items))) {
+            if( NULL != stick_offset_ptr )
+            {               
+                if (ImGui::SliderInt("Stick Start Offset (0 - 32767)", stick_offset_ptr, 0, 32767, 0, ImGuiSliderFlags_ClampOnInput)){
+                    xemu_settings_save();
+                }
+            }
         }
 
         //
@@ -817,16 +843,8 @@ public:
 
     void Load()
     {
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(xmu1_path, tmp, sizeof(xmu1_path));
-
-        xemu_settings_get_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, &tmp);
-        len = strlen(tmp);
-        assert(len < MAX_STRING_LEN);
-        strncpy(xmu2_path, tmp, sizeof(xmu2_path));
-
+        strncpy(xmu1_path, g_config.sys.files.xmu1_path, sizeof(xmu1_path)-1);
+        strncpy(xmu2_path, g_config.sys.files.xmu2_path, sizeof(xmu2_path)-1);
         strncpy(flashrom_path, g_config.sys.files.flashrom_path, sizeof(flashrom_path)-1);
         strncpy(bootrom_path, g_config.sys.files.bootrom_path, sizeof(bootrom_path)-1);
         strncpy(hdd_path, g_config.sys.files.hdd_path, sizeof(hdd_path)-1);
@@ -837,8 +855,8 @@ public:
 
     void Save()
     {
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU1_PATH, xmu1_path);
-        xemu_settings_set_string(XEMU_SETTINGS_SYSTEM_XMU2_PATH, xmu2_path);
+        xemu_settings_set_string(&g_config.sys.files.xmu1_path, xmu1_path);
+        xemu_settings_set_string(&g_config.sys.files.xmu2_path, xmu2_path);
         xemu_settings_set_string(&g_config.sys.files.flashrom_path, flashrom_path);
         xemu_settings_set_string(&g_config.sys.files.bootrom_path, bootrom_path);
         xemu_settings_set_string(&g_config.sys.files.hdd_path, hdd_path);
@@ -2511,9 +2529,7 @@ void xemu_hud_render(void)
     ImGui::NewFrame();
     process_keyboard_shortcuts();
 
-    int ui_show_fps_bool;
-    xemu_settings_get_bool(XEMU_SETTINGS_DISPLAY_SHOW_FPS, &ui_show_fps_bool);
-    if(ui_show_fps_bool) {
+    if(g_config.display.ui.ui_show_fps_bool) {
     	// Draw the FPS before the menu
     	fps_manager.Draw();
     }

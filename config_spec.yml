@@ -16,6 +16,52 @@ input:
     port2: string
     port3: string
     port4: string
+  switches:
+    input_disable_rumble: 
+      type: integer
+      default: 0
+    ana_dig_switch: 
+      type: integer
+      default: 0
+    ana_btn_tpf: 
+      type: integer
+      default: 0
+    controller_1_lsdz: 
+      type: integer
+      default: 0
+    controller_1_rsdz: 
+      type: integer
+      default: 0
+    controller_2_lsdz: 
+      type: integer
+      default: 0
+    controller_2_rsdz: 
+      type: integer
+      default: 0
+    controller_3_lsdz: 
+      type: integer
+      default: 0
+    controller_3_rsdz: 
+      type: integer
+      default: 0
+    controller_4_lsdz: 
+      type: integer
+      default: 0
+    controller_4_rsdz: 
+      type: integer
+      default: 0
+    joy_start_offset_ctrl_1: 
+      type: integer
+      default: 0
+    joy_start_offset_ctrl_2: 
+      type: integer
+      default: 0
+    joy_start_offset_ctrl_3: 
+      type: integer
+      default: 0
+    joy_start_offset_ctrl_4: 
+      type: integer
+      default: 0
 
 display:
   quality:
@@ -28,11 +74,17 @@ display:
   ui:
     fit:
       type: enum
-      values: [center, scale, scale_16_9, scale_4_3, stretch]
+      values: [center, scale, scale_16_9, scale_4_3, scale_custom, stretch]
       default: scale
     scale:
       type: integer
       default: 1
+    ui_show_fps_bool:
+      type: integer
+      default: 0
+    custom_ratio:
+      type : string
+      default: 1.3333333333
 
 audio:
   use_dsp: bool
@@ -64,6 +116,8 @@ sys:
     eeprom_path: string
     hdd_path: string
     dvd_path: string
+    xmu1_path: string
+    xmu2_path: string
 
 perf:
   hard_fpu:

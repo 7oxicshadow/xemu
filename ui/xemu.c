@@ -847,12 +847,6 @@ static void sdl2_display_very_early_init(DisplayOptions *o)
 #endif
                                   , xemu_version);
 
-    // Check if the settings did not load and report to the user
-    if (xemu_settings_did_fail_to_load())
-    {
-        fprintf(stderr, "Window Validation: Settings failed to load. Using default screen resolution\n");
-    }
-
     // Create main window
     m_window = SDL_CreateWindow(
         title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480,
@@ -1196,10 +1190,8 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             t_ratio = 16.0f/9.0f;
         } else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_4_3) {
             t_ratio = 4.0f/3.0f;
-        } else if (scaling_mode == DISPLAY_SCALE_CUSTOM) {
-            const char *tmp;
-            xemu_settings_get_string(XEMU_SETTINGS_DISPLAY_CUSTOM_RATIO, &tmp);
-            t_ratio = strtof(tmp, NULL);
+        } else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_CUSTOM) {
+            t_ratio = strtof(g_config.display.ui.custom_ratio, NULL);
 
             /* Check for ratio out of range */
             if(t_ratio == 0.0f)
