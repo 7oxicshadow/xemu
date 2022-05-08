@@ -50,7 +50,6 @@
 #include "debug.h"
 #include "shaders.h"
 #include "nv2a_regs.h"
-#include "ui/xemu-shaders.h"
 
 #define GET_MASK(v, mask) (((v) & (mask)) >> ctz32(mask))
 

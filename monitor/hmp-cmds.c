@@ -57,7 +57,6 @@
 #include "hw/rdma/rdma.h"
 #include "migration/snapshot.h"
 #include "migration/misc.h"
-#include "ui/xemu-settings.h"
 
 #ifdef CONFIG_SPICE
 #include <spice/enums.h>
