@@ -28,6 +28,7 @@
 #include "hw/usb.h"
 #include "hw/usb/desc.h"
 #include "ui/xemu-input.h"
+#include "ui/xemu-settings.h"
 
 //#define DEBUG_XID
 #ifdef DEBUG_XID

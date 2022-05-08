@@ -27,6 +27,7 @@
 #include "compat.hh"
 #include "update.hh"
 #include "../xemu-os-utils.h"
+#include "ui/xemu-input.h"
 
 extern float g_main_menu_height; // FIXME
 
@@ -170,6 +171,17 @@ void ShowMainMenu()
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &capture_renderdoc_frame);
             }
 #endif
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("XMU"))
+        {
+            if (ImGui::MenuItem("Mount XMU1", NULL)) {
+                xemu_mount_xmu(1);
+            }
+            if (ImGui::MenuItem("Mount XMU2", NULL)) {
+                xemu_mount_xmu(2);
+            }
             ImGui::EndMenu();
         }
 

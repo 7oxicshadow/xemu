@@ -23,6 +23,7 @@
 
 #include "s3tc.h"
 #include "ui/xemu-settings.h"
+#include "ui/xemu-shaders.h"
 #include "qemu/fast-hash.h"
 
 #define DBG_SURFACES 0

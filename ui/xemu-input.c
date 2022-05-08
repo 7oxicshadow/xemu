@@ -410,7 +410,8 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
             if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
                 y = 4;
 
-            temp = g_config.input.switches.ana_btn_tpf;
+            /* convert from float to int */
+            temp = (int)(g_config.input.switches.ana_btn_tpf * 20);
 
             if((local_buttonana_a[y] < 0xFF) && buttonstate)
                 if((local_buttonana_a[y] + temp) < 255U)
@@ -455,27 +456,27 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
         switch(state->bound)
         {
             case 0:
-                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_1_lsdz * MAX_INPUT_RANGE) / 100;
-                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_1_rsdz * MAX_INPUT_RANGE) / 100;
-                joy_offset = g_config.input.switches.joy_start_offset_ctrl_1;
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_1_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_1_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_1 * MAX_INPUT_RANGE);
             break;
 
             case 1:
-                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_2_lsdz * MAX_INPUT_RANGE) / 100;
-                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_2_rsdz * MAX_INPUT_RANGE) / 100;
-                joy_offset = g_config.input.switches.joy_start_offset_ctrl_2;
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_2_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_2_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_2 * MAX_INPUT_RANGE);
             break;
 
             case 2:
-                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_3_lsdz * MAX_INPUT_RANGE) / 100;
-                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_3_rsdz * MAX_INPUT_RANGE) / 100;
-                joy_offset = g_config.input.switches.joy_start_offset_ctrl_3;
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_3_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_3_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_3 * MAX_INPUT_RANGE);
             break;
 
             case 3:
-                JOYSTICK_LEFT_DEAD_ZONE = (g_config.input.switches.controller_4_lsdz * MAX_INPUT_RANGE) / 100;
-                JOYSTICK_RIGHT_DEAD_ZONE = (g_config.input.switches.controller_4_rsdz * MAX_INPUT_RANGE) / 100;
-                joy_offset = g_config.input.switches.joy_start_offset_ctrl_4;
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_4_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_4_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_4 * MAX_INPUT_RANGE);
             break;
 
             default:

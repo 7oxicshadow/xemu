@@ -23,7 +23,7 @@ xemu_ss.add(files(
   'xemu-monitor.c',
   'xemu-net.c',
   'xemu-settings.cc',
-
+  'xemu-shaders.c',
   'xemu.c',
   'xemu-data.c',
 ))

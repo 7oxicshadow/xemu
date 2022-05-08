@@ -20,49 +20,49 @@ input:
     port4: string
   switches:
     input_disable_rumble: 
-      type: integer
+      type: bool
       default: 0
     ana_dig_switch: 
-      type: integer
+      type: bool
       default: 0
     ana_btn_tpf: 
-      type: integer
-      default: 0
+      type: number
+      default: 1
     controller_1_lsdz: 
-      type: integer
+      type: number
       default: 0
     controller_1_rsdz: 
-      type: integer
+      type: number
       default: 0
     controller_2_lsdz: 
-      type: integer
+      type: number
       default: 0
     controller_2_rsdz: 
-      type: integer
+      type: number
       default: 0
     controller_3_lsdz: 
-      type: integer
+      type: number
       default: 0
     controller_3_rsdz: 
-      type: integer
+      type: number
       default: 0
     controller_4_lsdz: 
-      type: integer
+      type: number
       default: 0
     controller_4_rsdz: 
-      type: integer
+      type: number
       default: 0
     joy_start_offset_ctrl_1: 
-      type: integer
+      type: number
       default: 0
     joy_start_offset_ctrl_2: 
-      type: integer
+      type: number
       default: 0
     joy_start_offset_ctrl_3: 
-      type: integer
+      type: number
       default: 0
     joy_start_offset_ctrl_4: 
-      type: integer
+      type: number
       default: 0
   gamecontrollerdb_path: string
   auto_bind:
