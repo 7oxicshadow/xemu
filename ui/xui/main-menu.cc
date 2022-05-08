@@ -409,6 +409,7 @@ void MainMenuDisplayView::Draw()
                  "Scale\0"
                  "Scale (Widescreen 16:9)\0"
                  "Scale (4:3)\0"
+                 "Scale (Custom)\0"
                  "Stretch\0",
                  "Select how the framebuffer should fit or scale into the window");
 }

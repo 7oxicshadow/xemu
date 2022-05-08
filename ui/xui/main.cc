@@ -224,22 +224,24 @@ void xemu_hud_render(void)
 
     if (g_config.display.ui.show_menubar && !first_boot_window.is_open) {
         // Auto-hide main menu after 1s of inactivity
-        #define TIMEOUT (1000)
+        #define TIMEOUT (2000)
         static uint32_t last_check = -TIMEOUT;
         float alpha = 1.0;
         const uint32_t timeout = TIMEOUT;
         const float fade_duration = 1000.0;
-        bool menu_wakeup = g_input_mgr.MouseClickedOnly();
+        bool menu_wakeup = false;
+
+        /* initially only wake on click, and then keep alive is mouse movement detected */
+        if( g_input_mgr.MouseClickedOnly() ||
+          ( ((now-last_check) < (timeout + (uint32_t)fade_duration)) && g_input_mgr.MouseMoved() ) )
+        {
+            menu_wakeup = true;
+        }
+
         if (menu_wakeup) {
             last_check = now;
         }
-
-        /* keep the menu alive if the mouse is still moving */
-        if( ((now-last_check) < timeout) && g_input_mgr.MouseMovedOnly() )
-        {
-            last_check = now;
-        }
-
+        
         if ((now-last_check) > timeout) {
             if (g_config.display.ui.use_animations) {
                 float t = fmin((float)((now-last_check)-timeout)/fade_duration, 1);

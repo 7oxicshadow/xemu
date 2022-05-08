@@ -723,6 +723,9 @@ void SaveScreenshot(GLuint tex, bool flip)
     } else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_4_3) {
         width = height * (4.0f / 3.0f);
     }
+    else if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_CUSTOM) {
+        width = height * strtof(g_config.display.ui.custom_ratio, NULL);
+    }
 
     std::vector<uint8_t> pixels;
     pixels.resize(width * height * 3);

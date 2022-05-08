@@ -149,7 +149,7 @@ void ShowMainMenu()
 
             ImGui::Combo("Display Mode", &g_config.display.ui.fit,
                          "Center\0Scale\0Scale (Widescreen 16:9)\0Scale "
-                         "(4:3)\0Stretch\0");
+                         "(4:3)\0Scale (Custom)\0Stretch\0");
             ImGui::SameLine();
             HelpMarker("Controls how the rendered content should be scaled "
                        "into the window");
