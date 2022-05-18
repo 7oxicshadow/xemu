@@ -489,6 +489,8 @@
 #define NV_PGRAPH_SHADERCTL                              0x00001998
 #define NV_PGRAPH_SHADERPROG                             0x0000199C
 #define NV_PGRAPH_SEMAPHOREOFFSET                        0x000019A0
+#define NV_PGRAPH_SHADOWCTL                              0x000019A4
+#   define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC                     0x00000007
 #define NV_PGRAPH_SHADOWZSLOPETHRESHOLD                  0x000019A8
 #define NV_PGRAPH_SPECFOGFACTOR0                         0x000019AC
 #define NV_PGRAPH_SPECFOGFACTOR1                         0x000019B0
@@ -1218,6 +1220,15 @@
 #   define NV097_SET_COMBINER_COLOR_OCW                       0x00001E40
 #   define NV097_SET_COMBINER_CONTROL                         0x00001E60
 #   define NV097_SET_SHADOW_ZSLOPE_THRESHOLD                  0x00001E68
+#   define NV097_SET_SHADOW_DEPTH_FUNC                        0x00001E6C
+#       define NV097_SET_SHADOW_DEPTH_FUNC_NEVER                0x00000000
+#       define NV097_SET_SHADOW_DEPTH_FUNC_LESS                 0x00000001
+#       define NV097_SET_SHADOW_DEPTH_FUNC_EQUAL                0x00000002
+#       define NV097_SET_SHADOW_DEPTH_FUNC_LEQUAL               0x00000003
+#       define NV097_SET_SHADOW_DEPTH_FUNC_GREATER              0x00000004
+#       define NV097_SET_SHADOW_DEPTH_FUNC_NOTEQUAL             0x00000005
+#       define NV097_SET_SHADOW_DEPTH_FUNC_GEQUAL               0x00000006
+#       define NV097_SET_SHADOW_DEPTH_FUNC_ALWAYS               0x00000007
 #   define NV097_SET_SHADER_STAGE_PROGRAM                     0x00001E70
 #   define NV097_SET_DOT_RGBMAPPING                           0X00001E74
 #   define NV097_SET_SHADER_OTHER_STAGE_INPUT                 0x00001E78

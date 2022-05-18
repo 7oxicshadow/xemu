@@ -221,6 +221,7 @@ typedef struct ColorFormatInfo {
     GLenum gl_format;
     GLenum gl_type;
     GLenum gl_swizzle_mask[4];
+    bool depth;
 } ColorFormatInfo;
 
 static const ColorFormatInfo kelvin_color_format_map[66] = {
@@ -302,14 +303,20 @@ static const ColorFormatInfo kelvin_color_format_map[66] = {
         {2, true, GL_RGBA8,  GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV},
     [NV097_SET_TEXTURE_FORMAT_COLOR_LC_IMAGE_YB8CR8YA8CB8] =
         {2, true, GL_RGBA8,  GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV},
-    [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED] =
-        {4, true, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
+
     [NV097_SET_TEXTURE_FORMAT_COLOR_SZ_DEPTH_Y16_FIXED] =
-        {2, false, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
+        {2, false, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT,
+         {GL_RED, GL_ZERO, GL_ZERO, GL_ZERO}, true},
+    [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED] =
+        {4, true, GL_DEPTH_COMPONENT, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8,
+         {GL_RED, GL_ONE, GL_ZERO, GL_ZERO}, true},
     [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED] =
-        {2, true, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
+        {2, true, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT,
+         {GL_RED, GL_ZERO, GL_ZERO, GL_ZERO}, true},
     [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT] =
-        {2, true, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_FLOAT},
+        {2, true, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_FLOAT,
+          {GL_RED, GL_ZERO, GL_ZERO, GL_ZERO}, true},
+
     [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_Y16] =
         {2, true, GL_R16, GL_RED, GL_UNSIGNED_SHORT,
          {GL_RED, GL_RED, GL_RED, GL_ONE}},
@@ -404,6 +411,8 @@ static void pgraph_get_surface_dimensions(PGRAPHState *pg, unsigned int *width, 
 static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size, bool quick);
 static void pgraph_bind_vertex_attributes(NV2AState *d, unsigned int min_element, unsigned int max_element, bool inline_data, unsigned int inline_stride, unsigned int provoking_element);
 static unsigned int pgraph_bind_inline_array(NV2AState *d);
+static bool pgraph_is_texture_stage_active(PGRAPHState *pg, unsigned int stage);
+
 static float convert_f16_to_float(uint16_t f16);
 static float convert_f24_to_float(uint32_t f24);
 static uint8_t cliptobyte(int x);
@@ -875,6 +884,11 @@ static void pgraph_image_blit(NV2AState *d)
         if (image_blit->height < surf_dest->height ||
             image_blit->width < surf_dest->width) {
             pgraph_download_surface_data_if_dirty(d, surf_dest);
+        } else {
+            // The blit will completely replace the surface so any pending
+            // download should be discarded.
+            surf_dest->download_pending = false;
+            surf_dest->draw_dirty = false;
         }
         surf_dest->upload_pending = true;
     }
@@ -1508,13 +1522,17 @@ DEF_METHOD(NV097, SET_WINDOW_CLIP_TYPE)
 DEF_METHOD_INC(NV097, SET_WINDOW_CLIP_HORIZONTAL)
 {
     int slot = (method - NV097_SET_WINDOW_CLIP_HORIZONTAL) / 4;
-    pg->regs[NV_PGRAPH_WINDOWCLIPX0 + slot * 4] = parameter;
+    for (; slot < 8; ++slot) {
+        pg->regs[NV_PGRAPH_WINDOWCLIPX0 + slot * 4] = parameter;
+    }
 }
 
 DEF_METHOD_INC(NV097, SET_WINDOW_CLIP_VERTICAL)
 {
     int slot = (method - NV097_SET_WINDOW_CLIP_VERTICAL) / 4;
-    pg->regs[NV_PGRAPH_WINDOWCLIPY0 + slot * 4] = parameter;
+    for (; slot < 8; ++slot) {
+        pg->regs[NV_PGRAPH_WINDOWCLIPY0 + slot * 4] = parameter;
+    }
 }
 
 DEF_METHOD(NV097, SET_ALPHA_TEST_ENABLE)
@@ -2788,6 +2806,14 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             glEndQuery(GL_SAMPLES_PASSED);
         }
 
+        pg->draw_time++;
+        if (pg->color_binding && pgraph_color_write_enabled(pg)) {
+            pg->color_binding->draw_time = pg->draw_time;
+        }
+        if (pg->zeta_binding && pgraph_zeta_write_enabled(pg)) {
+            pg->zeta_binding->draw_time = pg->draw_time;
+        }
+
         NV2A_GL_DGROUP_END();
     } else {
         NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x", parameter);
@@ -3532,6 +3558,12 @@ DEF_METHOD(NV097, SET_SHADOW_ZSLOPE_THRESHOLD)
     assert(parameter == 0x7F800000); /* FIXME: Unimplemented */
 }
 
+DEF_METHOD(NV097, SET_SHADOW_DEPTH_FUNC)
+{
+    SET_MASK(pg->regs[NV_PGRAPH_SHADOWCTL], NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC,
+             parameter);
+}
+
 DEF_METHOD(NV097, SET_SHADER_STAGE_PROGRAM)
 {
     pg->regs[NV_PGRAPH_SHADERPROG] = parameter;
@@ -4084,6 +4116,7 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
     }
 
     /* Clipping regions */
+    int max_gl_height = pg->surface_binding_dim.height - 1;
     for (i = 0; i < 8; i++) {
         uint32_t x = pg->regs[NV_PGRAPH_WINDOWCLIPX0 + i * 4];
         unsigned int x_min = GET_MASK(x, NV_PGRAPH_WINDOWCLIPX0_XMIN);
@@ -4095,9 +4128,9 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
         pgraph_apply_anti_aliasing_factor(pg, &x_max, &y_max);
 
         /* Translate for the GL viewport origin */
-        unsigned int y_min_xlat = MAX(pg->surface_binding_dim.height - y_max - 1, 0);
-        unsigned int y_max_xlat = MIN(pg->surface_binding_dim.height - y_min - 1,
-                                      pg->surface_binding_dim.height);
+        unsigned int y_min_xlat = MAX(max_gl_height - (int)y_max, 0);
+        unsigned int y_max_xlat = MIN(max_gl_height - (int)y_min, max_gl_height);
+
         pgraph_apply_scaling_factor(pg, &x_min, &y_min_xlat);
         pgraph_apply_scaling_factor(pg, &x_max, &y_max_xlat);
 
@@ -4133,6 +4166,7 @@ static bool pgraph_bind_shaders_test_dirty(PGRAPHState *pg)
     #define DIRTY_REGS \
         CR_1(NV_PGRAPH_COMBINECTL) \
         CR_1(NV_PGRAPH_SHADERCTL) \
+        CR_1(NV_PGRAPH_SHADOWCTL) \
         CR_1(NV_PGRAPH_COMBINESPECFOG0) \
         CR_1(NV_PGRAPH_COMBINESPECFOG1) \
         CR_1(NV_PGRAPH_CONTROL_0) \
@@ -4232,6 +4266,9 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
 
     state.psh.point_sprite = pg->regs[NV_PGRAPH_SETUPRASTER] &
                                  NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE;
+
+    state.psh.shadow_depth_func = (enum PshShadowDepthFunc)GET_MASK(
+        pg->regs[NV_PGRAPH_SHADOWCTL], NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC);
 
     state.fixed_function = fixed_function;
 
@@ -4349,14 +4386,15 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
             state.psh.compare_mode[i][j] =
                 (pg->regs[NV_PGRAPH_SHADERCLIPMODE] >> (4 * i + j)) & 1;
         }
-        state.psh.alphakill[i] = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
-                               & NV_PGRAPH_TEXCTL0_0_ALPHAKILLEN;
 
-        bool enabled = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
-                         & NV_PGRAPH_TEXCTL0_0_ENABLE;
+        uint32_t ctl_0 = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4];
+        bool enabled = pgraph_is_texture_stage_active(pg, i) &&
+                       (ctl_0 & NV_PGRAPH_TEXCTL0_0_ENABLE);
         if (!enabled) {
             continue;
         }
+
+        state.psh.alphakill[i] = ctl_0 & NV_PGRAPH_TEXCTL0_0_ALPHAKILLEN;
 
         unsigned int color_format =
             GET_MASK(pg->regs[NV_PGRAPH_TEXFMT0 + i*4],
@@ -4375,6 +4413,8 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
          */
         state.psh.snorm_tex[i] = (f.gl_internal_format == GL_RGB8_SNORM)
                                  || (f.gl_internal_format == GL_RG8_SNORM);
+
+        state.psh.shadow_map[i] = f.depth;
 
         uint32_t filter = pg->regs[NV_PGRAPH_TEXFILTER0 + i*4];
         unsigned int min_filter = GET_MASK(filter, NV_PGRAPH_TEXFILTER0_MIN);
@@ -4778,14 +4818,15 @@ static void pgraph_init_display_renderer(NV2AState *d)
         "    texCoord.y = 1 + rel*(texCoord.y - 1);"
         "    out_Color.rgba = texture(tex, texCoord);\n"
         "    if (pvideo_enable) {\n"
+        "        vec2 screenCoord = gl_FragCoord.xy - 0.5;\n"
         "        vec4 extent = vec4(pvideo_pos.xy, pvideo_pos.xy + pvideo_pos.zw);\n"
-        "        bvec4 clip = bvec4(lessThan(gl_FragCoord.xy, extent.xy),\n"
-        "                           greaterThan(gl_FragCoord.xy, extent.zw));\n"
+        "        bvec4 clip = bvec4(lessThan(screenCoord, extent.xy),\n"
+        "                           greaterThan(screenCoord, extent.zw));\n"
         "        if (!any(clip)) {\n"
-        "            vec2 spos = vec2(gl_FragCoord.x, textureSize(tex,0).y-gl_FragCoord.y);\n"
-        "            vec2 coord = (spos-pvideo_pos.xy)/pvideo_pos.zw;\n"
+        "            vec2 videoCoord = (screenCoord - pvideo_pos.xy) / pvideo_pos.zw;\n"
+        "            videoCoord.y *= -1.0;\n"
         "            if (!pvideo_color_key_enable || out_Color.rgba == pvideo_color_key) {\n"
-        "               out_Color.rgba = texture(pvideo_tex, coord);\n"
+        "               out_Color.rgba = texture(pvideo_tex, videoCoord);\n"
         "            }\n"
         "        }\n"
         "    }\n"
@@ -4903,6 +4944,9 @@ static void pgraph_render_display_pvideo_overlay(NV2AState *d)
 
     pgraph_apply_scaling_factor(pg, &out_x, &out_y);
     pgraph_apply_scaling_factor(pg, &out_width, &out_height);
+
+    // Translate for the GL viewport origin.
+    out_y = MAX(pg->gl_display_buffer_height - 1 - (int)(out_y + out_height), 0);
 
     glActiveTexture(GL_TEXTURE0 + 1);
     glBindTexture(GL_TEXTURE_2D, g_nv2a->pgraph.disp_rndr.pvideo_tex);
@@ -6252,6 +6296,13 @@ static bool pgraph_check_texture_dirty(NV2AState *d, hwaddr addr, hwaddr size)
                                               DIRTY_MEMORY_NV2A_TEX);
 }
 
+static bool pgraph_is_texture_stage_active(PGRAPHState *pg, unsigned int stage)
+{
+    assert(stage < NV2A_MAX_TEXTURES);
+    uint32_t mode = (pg->regs[NV_PGRAPH_SHADERPROG] >> (stage * 5)) & 0x1F;
+    return !!mode;
+}
+
 static void pgraph_bind_textures(NV2AState *d)
 {
     int i;
@@ -6260,15 +6311,27 @@ static void pgraph_bind_textures(NV2AState *d)
     NV2A_GL_DGROUP_BEGIN("%s", __func__);
 
     for (i=0; i<NV2A_MAX_TEXTURES; i++) {
-
         uint32_t ctl_0 = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4];
+        bool enabled = pgraph_is_texture_stage_active(pg, i) &&
+                       GET_MASK(ctl_0, NV_PGRAPH_TEXCTL0_0_ENABLE);
+        /* FIXME: What happens if texture is disabled but stage is active? */
+
+        glActiveTexture(GL_TEXTURE0 + i);
+        if (!enabled) {
+            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+            glBindTexture(GL_TEXTURE_1D, 0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glBindTexture(GL_TEXTURE_3D, 0);
+            continue;
+        }
+
         uint32_t ctl_1 = pg->regs[NV_PGRAPH_TEXCTL1_0 + i*4];
         uint32_t fmt = pg->regs[NV_PGRAPH_TEXFMT0 + i*4];
         uint32_t filter = pg->regs[NV_PGRAPH_TEXFILTER0 + i*4];
-        uint32_t address =  pg->regs[NV_PGRAPH_TEXADDRESS0 + i*4];
-        uint32_t palette =  pg->regs[NV_PGRAPH_TEXPALETTE0 + i*4];
+        uint32_t address = pg->regs[NV_PGRAPH_TEXADDRESS0 + i*4];
+        uint32_t palette = pg->regs[NV_PGRAPH_TEXPALETTE0 + i*4];
 
-        bool enabled = GET_MASK(ctl_0, NV_PGRAPH_TEXCTL0_0_ENABLE);
         unsigned int min_mipmap_level =
             GET_MASK(ctl_0, NV_PGRAPH_TEXCTL0_0_MIN_LOD_CLAMP);
         unsigned int max_mipmap_level =
@@ -6334,23 +6397,38 @@ static void pgraph_bind_textures(NV2AState *d)
         if (filter & NV_PGRAPH_TEXFILTER0_GSIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_GSIGNED");
         if (filter & NV_PGRAPH_TEXFILTER0_BSIGNED) NV2A_UNIMPLEMENTED("NV_PGRAPH_TEXFILTER0_BSIGNED");
 
-        glActiveTexture(GL_TEXTURE0 + i);
-        if (!enabled) {
-            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-            glBindTexture(GL_TEXTURE_1D, 0);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glBindTexture(GL_TEXTURE_3D, 0);
-            continue;
-        }
-
         nv2a_profile_inc_counter(NV2A_PROF_TEX_BIND);
 
-        if (!pg->texture_dirty[i] && pg->texture_binding[i]) {
+        hwaddr dma_len;
+        uint8_t *texture_data;
+        if (dma_select) {
+            texture_data = (uint8_t*)nv_dma_map(d, pg->dma_b, &dma_len);
+        } else {
+            texture_data = (uint8_t*)nv_dma_map(d, pg->dma_a, &dma_len);
+        }
+        assert(offset < dma_len);
+        texture_data += offset;
+        hwaddr texture_vram_offset = texture_data - d->vram_ptr;
+
+        SurfaceBinding *surface = pgraph_surface_get(d, texture_vram_offset);
+        TextureBinding *tbind = pg->texture_binding[i];
+        if (!pg->texture_dirty[i] && tbind &&
+            (!surface || tbind->draw_time == surface->draw_time)) {
             glBindTexture(pg->texture_binding[i]->gl_target,
                           pg->texture_binding[i]->gl_texture);
             continue;
         }
+
+        hwaddr palette_dma_len;
+        uint8_t *palette_data;
+        if (palette_dma_select) {
+            palette_data = (uint8_t*)nv_dma_map(d, pg->dma_b, &palette_dma_len);
+        } else {
+            palette_data = (uint8_t*)nv_dma_map(d, pg->dma_a, &palette_dma_len);
+        }
+        assert(palette_offset < palette_dma_len);
+        palette_data += palette_offset;
+        hwaddr palette_vram_offset = palette_data - d->vram_ptr;
 
         NV2A_DPRINTF(" texture %d is format 0x%x, "
                         "off 0x%" HWADDR_PRIx " (r %d, %d or %d, %d, %d; %d%s),"
@@ -6429,28 +6507,6 @@ static void pgraph_bind_textures(NV2AState *d)
             assert(levels > 0);
         }
 
-        hwaddr dma_len;
-        uint8_t *texture_data;
-        if (dma_select) {
-            texture_data = (uint8_t*)nv_dma_map(d, pg->dma_b, &dma_len);
-        } else {
-            texture_data = (uint8_t*)nv_dma_map(d, pg->dma_a, &dma_len);
-        }
-        assert(offset < dma_len);
-        texture_data += offset;
-        hwaddr texture_vram_offset = texture_data - d->vram_ptr;
-
-        hwaddr palette_dma_len;
-        uint8_t *palette_data;
-        if (palette_dma_select) {
-            palette_data = (uint8_t*)nv_dma_map(d, pg->dma_b, &palette_dma_len);
-        } else {
-            palette_data = (uint8_t*)nv_dma_map(d, pg->dma_a, &palette_dma_len);
-        }
-        assert(palette_offset < palette_dma_len);
-        palette_data += palette_offset;
-        hwaddr palette_vram_offset = palette_data - d->vram_ptr;
-
         size_t length = 0;
         if (f.linear) {
             assert(cubemap == false);
@@ -6515,10 +6571,13 @@ static void pgraph_bind_textures(NV2AState *d)
          * Check active surfaces to see if this texture was a render target
          */
         bool surf_to_tex = false;
-        SurfaceBinding *surface = pgraph_surface_get(d, texture_vram_offset);
         if (surface != NULL) {
             surf_to_tex = pgraph_check_surface_to_texture_compatibility(
-                surface, &state);
+                    surface, &state);
+
+            if (surf_to_tex && surface->upload_pending) {
+                pgraph_upload_surface_data(d, surface, false);
+            }
         }
 
         if (!surf_to_tex) {
@@ -6606,7 +6665,8 @@ static void pgraph_bind_textures(NV2AState *d)
         TextureBinding *binding = key_out->binding;
         binding->refcnt++;
 
-        if (surf_to_tex && (binding->draw_time < surface->draw_time)) {
+        if (surf_to_tex && binding->draw_time < surface->draw_time) {
+
             NV2A_XPRINTF(DBG_SURFACES,
                 "Rendering surface @ %" HWADDR_PRIx " to texture (%dx%d)\n",
                 surface->vram_addr, surface->width, surface->height);

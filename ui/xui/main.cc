@@ -197,7 +197,9 @@ void xemu_hud_render(void)
     }
 
     if (!first_boot_window.is_open) {
-        RenderFramebuffer(g_tex, io.DisplaySize.x, io.DisplaySize.y, g_flip_req);
+        int ww, wh;
+        SDL_GL_GetDrawableSize(g_sdl_window, &ww, &wh);
+        RenderFramebuffer(g_tex, ww, wh, g_flip_req);
     }
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -216,9 +218,9 @@ void xemu_hud_render(void)
     }
 
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
-    if (capture_renderdoc_frame) {
+    if (g_capture_renderdoc_frame) {
         nv2a_dbg_renderdoc_capture_frames(1);
-        capture_renderdoc_frame = false;
+        g_capture_renderdoc_frame = false;
     }
 #endif
 
