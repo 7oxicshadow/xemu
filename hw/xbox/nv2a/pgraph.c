@@ -400,7 +400,7 @@ static void pgraph_download_surface_data_to_buffer(NV2AState *d,
                                                    uint8_t *pixels);
 static void pgraph_upload_surface_data(NV2AState *d, SurfaceBinding *surface, bool force);
 static bool pgraph_check_surface_compatibility(SurfaceBinding *s1, SurfaceBinding *s2, bool strict);
-static bool pgraph_check_surface_to_texture_compatibility(SurfaceBinding *surface, TextureShape *shape);
+static bool pgraph_check_surface_to_texture_compatibility(const SurfaceBinding *surface, const TextureShape *shape);
 static void pgraph_render_surface_to_texture(NV2AState *d, SurfaceBinding *surface, TextureBinding *texture, TextureShape *texture_shape, int texture_unit);
 static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color);
 static void pgraph_update_surface(NV2AState *d, bool upload, bool color_write, bool zeta_write);
@@ -891,6 +891,7 @@ static void pgraph_image_blit(NV2AState *d)
             surf_dest->draw_dirty = false;
         }
         surf_dest->upload_pending = true;
+        pg->draw_time++;
     }
 
     hwaddr source_offset = image_blit->in_y * context_surfaces->source_pitch +
@@ -5131,8 +5132,8 @@ int nv2a_get_framebuffer_surface(void)
 }
 
 static bool pgraph_check_surface_to_texture_compatibility(
-    SurfaceBinding *surface,
-    TextureShape *shape)
+    const SurfaceBinding *surface,
+    const TextureShape *shape)
 {
     // FIXME: Better checks/handling on formats and surface-texture compat
 
@@ -5299,8 +5300,14 @@ static void pgraph_surface_invalidate(NV2AState *d, SurfaceBinding *surface)
 {
     trace_nv2a_pgraph_surface_invalidated(surface->vram_addr);
 
-    assert(surface != d->pgraph.color_binding);
-    assert(surface != d->pgraph.zeta_binding);
+    if (surface == d->pgraph.color_binding) {
+        assert(d->pgraph.surface_color.buffer_dirty);
+        pgraph_unbind_surface(d, true);
+    }
+    if (surface == d->pgraph.zeta_binding) {
+        assert(d->pgraph.surface_zeta.buffer_dirty);
+        pgraph_unbind_surface(d, false);
+    }
 
     if (tcg_enabled()) {
         qemu_mutex_unlock(&d->pgraph.lock);
@@ -5710,6 +5717,7 @@ static void pgraph_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     PGRAPHState *pg = &d->pgraph;
 
     surface->upload_pending = false;
+    surface->draw_time = pg->draw_time;
 
     if (pg->surface_scale_factor == 1) {
         pgraph_upload_surface_data_no_scale(d, surface, force);
@@ -6021,13 +6029,13 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
                 pgraph_check_surface_compatibility(found, &entry, false);
             NV2A_XPRINTF(DBG_SURFACES,
                          "%6s: [%5s @ %" HWADDR_PRIx " (%dx%d)] (%s) "
-                         "aa:%d, clip:x=%d,w=%d,y=%d,h=%d\n",
+                         "aa:%d, clip:x=%d,w=%d,y=%d,h=%d,p=%d\n",
                          "Match", found->color ? "COLOR" : "ZETA",
                          found->vram_addr, found->width, found->height,
                          found->swizzle ? "sz" : "ln",
                          found->shape.anti_aliasing, found->shape.clip_x,
                          found->shape.clip_width, found->shape.clip_y,
-                         found->shape.clip_height);
+                         found->shape.clip_height, found->pitch);
 
             assert(!(entry.swizzle && pg->clearing));
 
@@ -6112,18 +6120,23 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
             pg->surface_binding_dim.height = entry.height;
             pg->surface_binding_dim.clip_y = entry.shape.clip_y;
             pg->surface_binding_dim.clip_height = entry.shape.clip_height;
+
+            if (color && pg->zeta_binding && (pg->zeta_binding->width != entry.width || pg->zeta_binding->height != entry.height)) {
+                pg->surface_zeta.buffer_dirty = true;
+            }
         }
 
         found->upload_pending &= !skip_sync;
 
         NV2A_XPRINTF(DBG_SURFACES,
                      "%6s: [%5s @ %" HWADDR_PRIx " (%dx%d)] (%s) "
-                     "aa:%d, clip:x=%d,w=%d,y=%d,h=%d\n",
+                     "aa:%d, clip:x=%d,w=%d,y=%d,h=%d,p=%d\n",
                      should_create ? "Create" : "Hit", color ? "COLOR" : "ZETA",
                      found->vram_addr, found->width, found->height,
                      found->swizzle ? "sz" : "ln", found->shape.anti_aliasing,
                      found->shape.clip_x, found->shape.clip_width,
-                     found->shape.clip_y, found->shape.clip_height);
+                     found->shape.clip_y, found->shape.clip_height,
+                     found->pitch);
 
         if (color) {
             pg->color_binding = found;
