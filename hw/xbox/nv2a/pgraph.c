@@ -26,9 +26,6 @@
 #include "ui/xemu-shaders.h"
 #include "qemu/fast-hash.h"
 
-#define DBG_SURFACES 0
-#define DBG_SURFACE_SYNC 0
-
 static NV2AState *g_nv2a;
 GloContext *g_nv2a_context_render;
 GloContext *g_nv2a_context_scale;
@@ -310,6 +307,10 @@ static const ColorFormatInfo kelvin_color_format_map[66] = {
     [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED] =
         {4, true, GL_DEPTH_COMPONENT, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8,
          {GL_RED, GL_ONE, GL_ZERO, GL_ZERO}, true},
+    [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT] =
+        /* FIXME: Uses fixed-point format to match surface format hack below. */
+        {4, true, GL_DEPTH_COMPONENT, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8,
+         {GL_RED, GL_ONE, GL_ZERO, GL_ZERO}, true},
     [NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED] =
         {2, true, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT,
          {GL_RED, GL_ZERO, GL_ZERO, GL_ZERO}, true},
@@ -357,10 +358,14 @@ static const SurfaceFormatInfo kelvin_surface_zeta_float_format_map[] = {
     [NV097_SET_SURFACE_FORMAT_ZETA_Z16] =
         {2, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_HALF_FLOAT, GL_DEPTH_ATTACHMENT},
     [NV097_SET_SURFACE_FORMAT_ZETA_Z24S8] =
-        {4, GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL, GL_FLOAT_32_UNSIGNED_INT_24_8_REV, GL_DEPTH_STENCIL_ATTACHMENT},
+        /* FIXME: GL does not support packing floating-point Z24S8 OOTB, so for
+         *        now just emulate this with fixed-point Z24S8. Possible compat
+         *        improvement with custom conversion.
+         */
+        {4, GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, GL_DEPTH_STENCIL_ATTACHMENT},
 };
 
-static const SurfaceFormatInfo kelvin_surface_zeta_int_format_map[] = {
+static const SurfaceFormatInfo kelvin_surface_zeta_fixed_format_map[] = {
     [NV097_SET_SURFACE_FORMAT_ZETA_Z16] =
         {2, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, GL_DEPTH_ATTACHMENT},
     [NV097_SET_SURFACE_FORMAT_ZETA_Z24S8] =
@@ -2676,8 +2681,13 @@ DEF_METHOD_INC(NV097, SET_EYE_DIRECTION)
 
 DEF_METHOD(NV097, SET_BEGIN_END)
 {
-    bool depth_test =
-        pg->regs[NV_PGRAPH_CONTROL_0] & NV_PGRAPH_CONTROL_0_ZENABLE;
+    uint32_t control_0 = pg->regs[NV_PGRAPH_CONTROL_0];
+    bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
+    bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
+    bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
+    bool mask_blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
+
+    bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool stencil_test =
         pg->regs[NV_PGRAPH_CONTROL_1] & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
 
@@ -2815,6 +2825,9 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             pg->zeta_binding->draw_time = pg->draw_time;
         }
 
+        uint32_t color_write = mask_alpha | mask_red | mask_green | mask_blue;
+        pgraph_set_surface_dirty(pg, color_write, depth_test || stencil_test);
+
         NV2A_GL_DGROUP_END();
     } else {
         NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x", parameter);
@@ -2827,13 +2840,7 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         pgraph_bind_textures(d);
         pgraph_bind_shaders(pg);
 
-        uint32_t control_0 = pg->regs[NV_PGRAPH_CONTROL_0];
-
-        bool alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
-        bool red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
-        bool green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
-        bool blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
-        glColorMask(red, green, blue, alpha);
+        glColorMask(mask_red, mask_green, mask_blue, mask_alpha);
         glDepthMask(!!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE));
         glStencilMask(GET_MASK(pg->regs[NV_PGRAPH_CONTROL_1],
                                NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE));
@@ -2987,9 +2994,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             glDisable(GL_POLYGON_SMOOTH);
         }
 
-        //glDisableVertexAttribArray(NV2A_VERTEX_ATTR_DIFFUSE);
-        //glVertexAttrib4f(NV2A_VERTEX_ATTR_DIFFUSE, 1.0, 1.0, 1.0, 1.0);
-
         unsigned int vp_width = pg->surface_binding_dim.width,
                      vp_height = pg->surface_binding_dim.height;
         pgraph_apply_scaling_factor(pg, &vp_width, &vp_height);
@@ -3034,8 +3038,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             glBeginQuery(GL_SAMPLES_PASSED, gl_query);
         }
     }
-
-    pgraph_set_surface_dirty(pg, true, depth_test || stencil_test);
 }
 
 DEF_METHOD(NV097, SET_TEXTURE_OFFSET)
@@ -3356,8 +3358,7 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
 
         /* FIXME: Put these in some lookup table */
         const float f16_max = 511.9375f;
-        /* FIXME: 7 bits of mantissa unused. maybe use full buffer? */
-        const float f24_max = 3.4027977E38;
+        const float f24_max = 1.0E30;
 
         switch(pg->surface_shape.zeta_format) {
         case NV097_SET_SURFACE_FORMAT_ZETA_Z16: {
@@ -3375,7 +3376,6 @@ DEF_METHOD(NV097, CLEAR_SURFACE)
             uint32_t z = clear_zstencil >> 8;
             if (pg->surface_shape.z_format) {
                 gl_clear_depth = convert_f24_to_float(z) / f24_max;
-                assert(false); /* FIXME: Untested */
             } else {
                 gl_clear_depth = z / (float)0xFFFFFF;
             }
@@ -4651,7 +4651,7 @@ static bool pgraph_surface_to_texture_can_fastpath(SurfaceBinding *surface,
     default: break;
     }
 
-    NV2A_XPRINTF(DBG_SURFACES, "Surface->Texture compat failed: %x to %x\n",
+    trace_nv2a_pgraph_surface_texture_compat_failed(
         surface_fmt, texture_fmt);
     return false;
 }
@@ -5185,7 +5185,7 @@ static bool pgraph_check_surface_to_texture_compatibility(
         break;
     }
 
-    NV2A_XPRINTF(DBG_SURFACES, "Surface->Texture compat failed: %x to %x\n",
+    trace_nv2a_pgraph_surface_texture_compat_failed(
         surface_fmt, texture_fmt);
     return false;
 }
@@ -5233,8 +5233,6 @@ static SurfaceBinding *pgraph_surface_put(NV2AState *d,
     SurfaceBinding *surface_in)
 {
     assert(pgraph_surface_get(d, addr) == NULL);
-    trace_nv2a_pgraph_surface_created(surface_in->vram_addr,
-                                      surface_in->vram_addr + surface_in->size);
 
     SurfaceBinding *surface, *next;
     uintptr_t e_end = surface_in->vram_addr + surface_in->size - 1;
@@ -5243,9 +5241,9 @@ static SurfaceBinding *pgraph_surface_put(NV2AState *d,
         bool overlapping = !(surface->vram_addr > e_end
                              || surface_in->vram_addr > s_end);
         if (overlapping) {
-            NV2A_XPRINTF(DBG_SURFACES,
-                "Evicting overlapping surface @ %" HWADDR_PRIx " (%dx%d)\n",
-                surface->vram_addr, surface->width, surface->height);
+            trace_nv2a_pgraph_surface_evict_overlapping(
+                surface->vram_addr, surface->width, surface->height,
+                surface->pitch);
             pgraph_download_surface_data_if_dirty(d, surface);
             pgraph_surface_invalidate(d, surface);
         }
@@ -5331,7 +5329,7 @@ static void pgraph_surface_evict_old(NV2AState *d)
     QTAILQ_FOREACH_SAFE(s, &d->pgraph.surfaces, entry, next) {
         int last_used = d->pgraph.frame_time - s->frame_time;
         if (last_used >= surface_age_limit) {
-            NV2A_XPRINTF(DBG_SURFACES, "Evicting old surface\n");
+            trace_nv2a_pgraph_surface_evict_reason("old", s->vram_addr);
             pgraph_download_surface_data_if_dirty(d, s);
             pgraph_surface_invalidate(d, s);
         }
@@ -5394,6 +5392,13 @@ static void pgraph_download_surface_data_to_buffer_no_scale(
     PGRAPHState *pg = &d->pgraph;
 
     /*  Bind target surface to framebuffer */
+    trace_nv2a_pgraph_surface_download(
+        surface->color ? "COLOR" : "ZETA",
+        surface->swizzle ? "sz" : "lin", surface->vram_addr,
+        surface->width, surface->height, surface->pitch,
+        surface->fmt.bytes_per_pixel);
+
+    /*  Bind destination surface to framebuffer */
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            0, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
@@ -5706,9 +5711,7 @@ static void pgraph_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     nv2a_profile_inc_counter(NV2A_PROF_SURF_UPLOAD);
 
-    NV2A_XPRINTF(DBG_SURFACE_SYNC,
-                 "[RAM->GPU] %s (%s) surface @ %" HWADDR_PRIx
-                 " (w=%d,h=%d,p=%d,bpp=%d)\n",
+    trace_nv2a_pgraph_surface_upload(
                  surface->color ? "COLOR" : "ZETA",
                  surface->swizzle ? "sz" : "lin", surface->vram_addr,
                  surface->width, surface->height, surface->pitch,
@@ -5856,9 +5859,9 @@ static void pgraph_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 static void pgraph_compare_surfaces(SurfaceBinding *s1, SurfaceBinding *s2)
 {
     #define DO_CMP(fld) \
-            NV2A_XPRINTF(DBG_SURFACES, "%25s -- %8lx vs %8lx%s\n", \
-                #fld, (long int)s1->fld, (long int)s2->fld, \
-                 s1->fld != s2->fld ? " ***" : "");
+        if (s1->fld != s2->fld) \
+            trace_nv2a_pgraph_surface_compare_mismatch( \
+                #fld, (long int)s1->fld, (long int)s2->fld);
     DO_CMP(shape.clip_x)
     DO_CMP(shape.clip_width)
     DO_CMP(shape.clip_y)
@@ -5917,11 +5920,8 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
                ARRAY_SIZE(kelvin_surface_zeta_float_format_map));
         const SurfaceFormatInfo *map =
             pg->surface_shape.z_format ? kelvin_surface_zeta_float_format_map :
-                                         kelvin_surface_zeta_int_format_map;
+                                         kelvin_surface_zeta_fixed_format_map;
         fmt = map[pg->surface_shape.zeta_format];
-        assert(!(pg->surface_shape.zeta_format ==
-                     NV097_SET_SURFACE_FORMAT_ZETA_Z24S8 &&
-                 pg->surface_shape.z_format)); /* FIXME */
     }
 
     DMAObject dma = nv_dma_load(d, dma_address);
@@ -6012,14 +6012,13 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
             }
         }
 
-        NV2A_XPRINTF(DBG_SURFACES,
-                     "Target: [%5s @ %" HWADDR_PRIx "] (%s) "
-                     "aa:%d clip:x=%d,w=%d,y=%d,h=%d\n",
-                     color ? "COLOR" : "ZETA", entry.vram_addr,
-                     entry.swizzle ? "sz" : "ln",
-                     pg->surface_shape.anti_aliasing, pg->surface_shape.clip_x,
-                     pg->surface_shape.clip_width, pg->surface_shape.clip_y,
-                     pg->surface_shape.clip_height);
+        trace_nv2a_pgraph_surface_target(
+            color ? "COLOR" : "ZETA", entry.vram_addr,
+            entry.swizzle ? "sz" : "ln",
+            pg->surface_shape.anti_aliasing,
+            pg->surface_shape.clip_x,
+            pg->surface_shape.clip_width, pg->surface_shape.clip_y,
+            pg->surface_shape.clip_height);
 
         bool should_create = true;
         bool skip_sync = pg->clearing; /* FIXME: Incorrect if partial. */
@@ -6027,15 +6026,18 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
         if (found != NULL) {
             bool is_compatible =
                 pgraph_check_surface_compatibility(found, &entry, false);
-            NV2A_XPRINTF(DBG_SURFACES,
-                         "%6s: [%5s @ %" HWADDR_PRIx " (%dx%d)] (%s) "
-                         "aa:%d, clip:x=%d,w=%d,y=%d,h=%d,p=%d\n",
-                         "Match", found->color ? "COLOR" : "ZETA",
-                         found->vram_addr, found->width, found->height,
-                         found->swizzle ? "sz" : "ln",
-                         found->shape.anti_aliasing, found->shape.clip_x,
-                         found->shape.clip_width, found->shape.clip_y,
-                         found->shape.clip_height, found->pitch);
+
+#define TRACE_ARGS found->vram_addr, found->width, found->height, \
+            found->swizzle ? "sz" : "ln", \
+            found->shape.anti_aliasing, found->shape.clip_x, \
+            found->shape.clip_width, found->shape.clip_y, \
+            found->shape.clip_height, found->pitch
+            if (found->color) {
+                trace_nv2a_pgraph_surface_match_color(TRACE_ARGS);
+            } else {
+                trace_nv2a_pgraph_surface_match_zeta(TRACE_ARGS);
+            }
+#undef TRACE_ARGS
 
             assert(!(entry.swizzle && pg->clearing));
 
@@ -6050,8 +6052,8 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
                 is_compatible &= (pg->clearing || found->cleared) &&
                     pgraph_check_surface_compatibility(found, &entry, true);
                 if (is_compatible) {
-                    NV2A_XPRINTF(DBG_SURFACES, "Migrating surface type to %s\n",
-                                 entry.swizzle ? "swizzled" : "linear");
+                    trace_nv2a_pgraph_surface_migrate_type(
+                        entry.swizzle ? "swizzled" : "linear");
                 }
             }
 
@@ -6083,7 +6085,8 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
                 pg->surface_zeta.buffer_dirty |= color;
                 should_create = false;
             } else {
-                NV2A_XPRINTF(DBG_SURFACES, "Evicting incompatible surface\n");
+                trace_nv2a_pgraph_surface_evict_reason(
+                    "incompatible", found->vram_addr);
                 pgraph_compare_surfaces(found, &entry);
                 if (!skip_sync) {
                     pgraph_download_surface_data_if_dirty(d, found);
@@ -6128,21 +6131,28 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color)
 
         found->upload_pending &= !skip_sync;
 
-        NV2A_XPRINTF(DBG_SURFACES,
-                     "%6s: [%5s @ %" HWADDR_PRIx " (%dx%d)] (%s) "
-                     "aa:%d, clip:x=%d,w=%d,y=%d,h=%d,p=%d\n",
-                     should_create ? "Create" : "Hit", color ? "COLOR" : "ZETA",
-                     found->vram_addr, found->width, found->height,
-                     found->swizzle ? "sz" : "ln", found->shape.anti_aliasing,
-                     found->shape.clip_x, found->shape.clip_width,
-                     found->shape.clip_y, found->shape.clip_height,
-                     found->pitch);
+#define TRACE_ARGS found->vram_addr, found->width, found->height, \
+                   found->swizzle ? "sz" : "ln", found->shape.anti_aliasing, \
+                   found->shape.clip_x, found->shape.clip_width, \
+                   found->shape.clip_y, found->shape.clip_height, found->pitch
 
         if (color) {
+            if (should_create) {
+                trace_nv2a_pgraph_surface_create_color(TRACE_ARGS);
+            } else {
+                trace_nv2a_pgraph_surface_hit_color(TRACE_ARGS);
+            }
+
             pg->color_binding = found;
         } else {
+            if (should_create) {
+                trace_nv2a_pgraph_surface_create_zeta(TRACE_ARGS);
+            } else {
+                trace_nv2a_pgraph_surface_hit_zeta(TRACE_ARGS);
+            }
             pg->zeta_binding = found;
         }
+#undef TRACE_ARGS
 
         glFramebufferTexture2D(GL_FRAMEBUFFER, entry.fmt.gl_attachment,
                                GL_TEXTURE_2D, found->gl_buffer, 0);
@@ -6677,8 +6687,7 @@ static void pgraph_bind_textures(NV2AState *d)
 
         if (surf_to_tex && binding->draw_time < surface->draw_time) {
 
-            NV2A_XPRINTF(DBG_SURFACES,
-                "Rendering surface @ %" HWADDR_PRIx " to texture (%dx%d)\n",
+            trace_nv2a_pgraph_surface_render_to_texture(
                 surface->vram_addr, surface->width, surface->height);
             pgraph_render_surface_to_texture(d, surface, binding, &state, i);
             binding->draw_time = surface->draw_time;
@@ -6992,7 +7001,6 @@ static unsigned int pgraph_bind_inline_array(NV2AState *d)
 
     unsigned int vertex_size = offset;
     unsigned int index_count = pg->inline_array_length*4 / vertex_size;
-    assert((index_count*vertex_size) == (pg->inline_array_length*4));
 
     NV2A_DPRINTF("draw inline array %d, %d\n", vertex_size, index_count);
 
@@ -7000,7 +7008,7 @@ static unsigned int pgraph_bind_inline_array(NV2AState *d)
     glBindBuffer(GL_ARRAY_BUFFER, pg->gl_inline_array_buffer);
     glBufferData(GL_ARRAY_BUFFER, NV2A_MAX_BATCH_LENGTH * sizeof(uint32_t),
                  NULL, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, pg->inline_array_length*4, pg->inline_array);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, index_count * vertex_size, pg->inline_array);
     pgraph_bind_vertex_attributes(d, 0, index_count-1, true, vertex_size,
                                   index_count-1);
 
