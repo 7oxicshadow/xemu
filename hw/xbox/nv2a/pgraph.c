@@ -5449,14 +5449,6 @@ static void pgraph_download_surface_data_to_buffer(NV2AState *d,
                                                    bool downscale,
                                                    uint8_t *pixels)
 {
-    NV2A_XPRINTF(DBG_SURFACE_SYNC,
-                 "[GPU->RAM] %s (%s) surface @ %" HWADDR_PRIx
-                 " (w=%d,h=%d,p=%d,bpp=%d)\n",
-                 surface->color ? "COLOR" : "ZETA",
-                 surface->swizzle ? "sz" : "lin", surface->vram_addr,
-                 surface->width, surface->height, surface->pitch,
-                 surface->fmt.bytes_per_pixel);
-
     PGRAPHState *pg = &d->pgraph;
     swizzle &= surface->swizzle;
     downscale &= (pg->surface_scale_factor != 1);
