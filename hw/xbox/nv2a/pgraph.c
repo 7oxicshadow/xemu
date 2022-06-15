@@ -2691,6 +2691,7 @@ DEF_METHOD(NV097, SET_BEGIN_END)
     bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
     bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
     bool mask_blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
+    bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
 
     bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool stencil_test =
@@ -2699,6 +2700,12 @@ DEF_METHOD(NV097, SET_BEGIN_END)
     if (parameter == NV097_SET_BEGIN_END_OP_END) {
 
         nv2a_profile_inc_counter(NV2A_PROF_BEGIN_ENDS);
+
+        if (!(pg->color_binding || pg->zeta_binding)) {
+            // TODO: Factor out the end handling (done in PR #805).
+            NV2A_GL_DGROUP_END();
+            return;
+        }
 
         assert(pg->shader_binding);
 
@@ -2839,6 +2846,18 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         assert(parameter <= NV097_SET_BEGIN_END_OP_POLYGON);
 
         pgraph_update_surface(d, true, true, depth_test || stencil_test);
+
+        if (!(color_write || depth_test || stencil_test)) {
+            // FIXME: Check PGRAPH register 0x880.
+            // HW uses bit 11 in 0x880 to enable or disable a color/zeta limit
+            // check that will raise an exception in the case that a draw should
+            // modify the color and/or zeta buffer but the target(s) are masked
+            // off. This check only seems to trigger during the fragment
+            // processing, it is legal to attempt a draw that is entirely
+            // clipped regardless of 0x880. See xemu#635 for context.
+            return;
+        }
+
         assert(pg->color_binding || pg->zeta_binding);
 
         pg->primitive_mode = parameter;
@@ -2933,7 +2952,9 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             glDisable(GL_DEPTH_TEST);
         }
 
-        if (pg->depth_clamp_enable) {
+        if (GET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE],
+                     NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN) ==
+            NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN_CLAMP) {
             glEnable(GL_DEPTH_CLAMP);
         } else {
             glDisable(GL_DEPTH_CLAMP);
@@ -3328,10 +3349,24 @@ DEF_METHOD(NV097, BACK_END_WRITE_SEMAPHORE_RELEASE)
     //qemu_mutex_unlock_iothread();
 }
 
-DEF_METHOD(NV097, SET_DEPTH_CLAMP_CONTROL)
+DEF_METHOD(NV097, SET_ZMIN_MAX_CONTROL)
 {
-    pg->depth_clamp_enable =
-        parameter & NV097_SET_DEPTH_CLAMP_CONTROL_CLAMP_ENABLE;
+    switch (GET_MASK(parameter, NV097_SET_ZMIN_MAX_CONTROL_ZCLAMP_EN)) {
+    case NV097_SET_ZMIN_MAX_CONTROL_ZCLAMP_EN_CULL:
+        SET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE],
+                 NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN,
+                 NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN_CULL);
+        break;
+    case NV097_SET_ZMIN_MAX_CONTROL_ZCLAMP_EN_CLAMP:
+        SET_MASK(pg->regs[NV_PGRAPH_ZCOMPRESSOCCLUDE],
+                 NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN,
+                 NV_PGRAPH_ZCOMPRESSOCCLUDE_ZCLAMP_EN_CLAMP);
+        break;
+    default:
+        /* FIXME: Should raise NV_PGRAPH_NSOURCE_DATA_ERROR_PENDING */
+        assert(!"Invalid zclamp value");
+        break;
+    }
 }
 
 DEF_METHOD(NV097, SET_ZSTENCIL_CLEAR_VALUE)
