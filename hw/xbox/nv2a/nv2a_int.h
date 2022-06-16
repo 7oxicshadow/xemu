@@ -330,7 +330,7 @@ typedef struct PGRAPHState {
 
     hwaddr dma_vertex_a, dma_vertex_b;
 
-    unsigned int primitive_mode;
+    uint32_t primitive_mode;
 
     bool depth_clamp_enable;
 

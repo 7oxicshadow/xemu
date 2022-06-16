@@ -2685,22 +2685,32 @@ DEF_METHOD_INC(NV097, SET_EYE_DIRECTION)
     pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_EYED] = true;
 }
 
+static void pgraph_reset_inline_buffers(PGRAPHState *pg)
+{
+    pg->inline_elements_length = 0;
+    pg->inline_array_length = 0;
+    pg->inline_buffer_length = 0;
+    pg->draw_arrays_length = 0;
+    pg->draw_arrays_min_start = -1;
+    pg->draw_arrays_max_count = 0;
+    pg->draw_arrays_prevent_connect = false;
+}
+
 static void pgraph_flush_draw(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     if (!(pg->color_binding || pg->zeta_binding)) {
+        pgraph_reset_inline_buffers(pg);
         return;
     }
     assert(pg->shader_binding);
 
     if (pg->draw_arrays_length) {
-        nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
-
         NV2A_GL_DPRINTF(false, "Draw Arrays");
-
+        nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
+        assert(pg->inline_elements_length == 0);
         assert(pg->inline_buffer_length == 0);
         assert(pg->inline_array_length == 0);
-        assert(pg->inline_elements_length == 0);
 
         pgraph_bind_vertex_attributes(d, pg->draw_arrays_min_start,
                                       pg->draw_arrays_max_count - 1,
@@ -2711,10 +2721,8 @@ static void pgraph_flush_draw(NV2AState *d)
                           pg->gl_draw_arrays_count,
                           pg->draw_arrays_length);
     } else if (pg->inline_elements_length) {
-        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
-
         NV2A_GL_DPRINTF(false, "Inline Elements");
-
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
         assert(pg->inline_buffer_length == 0);
         assert(pg->inline_array_length == 0);
 
@@ -2754,12 +2762,9 @@ static void pgraph_flush_draw(NV2AState *d)
                        pg->inline_elements_length, GL_UNSIGNED_INT,
                        (void *)0);
     } else if (pg->inline_buffer_length) {
-        nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
-
         NV2A_GL_DPRINTF(false, "Inline Buffer");
-
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
         assert(pg->inline_array_length == 0);
-        assert(pg->inline_elements_length == 0);
 
         if (pg->compressed_attrs) {
             pg->compressed_attrs = 0;
@@ -2789,12 +2794,8 @@ static void pgraph_flush_draw(NV2AState *d)
         glDrawArrays(pg->shader_binding->gl_primitive_mode,
                      0, pg->inline_buffer_length);
     } else if (pg->inline_array_length) {
-        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
-
         NV2A_GL_DPRINTF(false, "Inline Array");
-
-        assert(pg->inline_buffer_length == 0);
-        assert(pg->inline_elements_length == 0);
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
 
         unsigned int index_count = pgraph_bind_inline_array(d);
         glDrawArrays(pg->shader_binding->gl_primitive_mode,
@@ -2803,6 +2804,8 @@ static void pgraph_flush_draw(NV2AState *d)
         NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
+
+    pgraph_reset_inline_buffers(pg);
 }
 
 DEF_METHOD(NV097, SET_BEGIN_END)
@@ -2813,12 +2816,14 @@ DEF_METHOD(NV097, SET_BEGIN_END)
     bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
     bool mask_blue = control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE;
     bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
-
     bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool stencil_test =
         pg->regs[NV_PGRAPH_CONTROL_1] & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
 
     if (parameter == NV097_SET_BEGIN_END_OP_END) {
+        if (pg->primitive_mode == PRIM_TYPE_INVALID) {
+            NV2A_DPRINTF("End without Begin!\n");
+        }
         nv2a_profile_inc_counter(NV2A_PROF_BEGIN_ENDS);
         pgraph_flush_draw(d);
 
@@ -2839,11 +2844,17 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         pgraph_set_surface_dirty(pg, color_write, depth_test || stencil_test);
 
         NV2A_GL_DGROUP_END();
+        pg->primitive_mode = PRIM_TYPE_INVALID;
     } else {
         NV2A_GL_DGROUP_BEGIN("NV097_SET_BEGIN_END: 0x%x", parameter);
+        if (pg->primitive_mode != PRIM_TYPE_INVALID) {
+            NV2A_DPRINTF("Begin without End!\n");
+        }
         assert(parameter <= NV097_SET_BEGIN_END_OP_POLYGON);
+        pg->primitive_mode = parameter;
 
         pgraph_update_surface(d, true, true, depth_test || stencil_test);
+        pgraph_reset_inline_buffers(pg);
 
         if (!(color_write || depth_test || stencil_test)) {
             // FIXME: Check PGRAPH register 0x880.
@@ -2858,7 +2869,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
 
         assert(pg->color_binding || pg->zeta_binding);
 
-        pg->primitive_mode = parameter;
         pgraph_bind_textures(d);
         pgraph_bind_shaders(pg);
 
@@ -3041,14 +3051,6 @@ DEF_METHOD(NV097, SET_BEGIN_END)
         glEnable(GL_SCISSOR_TEST);
         glScissor(xmin, ymin, scissor_width, scissor_height);
 
-        pg->inline_elements_length = 0;
-        pg->inline_array_length = 0;
-        pg->inline_buffer_length = 0;
-        pg->draw_arrays_length = 0;
-        pg->draw_arrays_min_start = -1;
-        pg->draw_arrays_max_count = 0;
-        pg->draw_arrays_prevent_connect = false;
-
         /* Visibility testing */
         if (pg->zpass_pixel_count_enable) {
             pg->gl_zpass_pixel_count_query_count++;
@@ -3210,22 +3212,27 @@ static void pgraph_expand_draw_arrays(NV2AState *d)
         pgraph_flush_draw(d);
     }
 
-    pg->draw_arrays_length = 0;
-    pg->draw_arrays_min_start = -1;
-    pg->draw_arrays_max_count = 0;
-    pg->draw_arrays_prevent_connect = false;
-
     assert((pg->inline_elements_length + count) < NV2A_MAX_BATCH_LENGTH);
     for (unsigned int i = 0; i < count; i++) {
         pg->inline_elements[pg->inline_elements_length++] = start + i;
     }
 }
 
+static void pgraph_check_within_begin_end_block(PGRAPHState *pg)
+{
+    if (pg->primitive_mode == PRIM_TYPE_INVALID) {
+        NV2A_DPRINTF("Vertex data being sent outside of begin/end block!\n");
+    }
+}
+
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 {
+    pgraph_check_within_begin_end_block(pg);
+
     if (pg->draw_arrays_length) {
         pgraph_expand_draw_arrays(d);
     }
+
     assert(pg->inline_elements_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_elements[pg->inline_elements_length++] = parameter & 0xFFFF;
     pg->inline_elements[pg->inline_elements_length++] = parameter >> 16;
@@ -3233,15 +3240,20 @@ DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT16)
 
 DEF_METHOD_NON_INC(NV097, ARRAY_ELEMENT32)
 {
+    pgraph_check_within_begin_end_block(pg);
+
     if (pg->draw_arrays_length) {
         pgraph_expand_draw_arrays(d);
     }
+
     assert(pg->inline_elements_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_elements[pg->inline_elements_length++] = parameter;
 }
 
 DEF_METHOD(NV097, DRAW_ARRAYS)
 {
+    pgraph_check_within_begin_end_block(pg);
+
     unsigned int start = GET_MASK(parameter, NV097_DRAW_ARRAYS_START_INDEX);
     unsigned int count = GET_MASK(parameter, NV097_DRAW_ARRAYS_COUNT) + 1;
 
@@ -3281,6 +3293,7 @@ DEF_METHOD(NV097, DRAW_ARRAYS)
 
 DEF_METHOD_NON_INC(NV097, INLINE_ARRAY)
 {
+    pgraph_check_within_begin_end_block(pg);
     assert(pg->inline_array_length < NV2A_MAX_BATCH_LENGTH);
     pg->inline_array[pg->inline_array_length++] = parameter;
 }
@@ -3791,7 +3804,6 @@ static void pgraph_method_log(unsigned int subchannel,
 static void pgraph_allocate_inline_buffer_vertices(PGRAPHState *pg,
                                                    unsigned int attr)
 {
-    int i;
     VertexAttribute *attribute = &pg->vertex_attributes[attr];
 
     if (attribute->inline_buffer_populated || pg->inline_buffer_length == 0) {
@@ -3800,26 +3812,22 @@ static void pgraph_allocate_inline_buffer_vertices(PGRAPHState *pg,
 
     /* Now upload the previous attribute value */
     attribute->inline_buffer_populated = true;
-    for (i = 0; i < pg->inline_buffer_length; i++) {
-        memcpy(&attribute->inline_buffer[i * 4],
-               attribute->inline_value,
+    for (int i = 0; i < pg->inline_buffer_length; i++) {
+        memcpy(&attribute->inline_buffer[i * 4], attribute->inline_value,
                sizeof(float) * 4);
     }
 }
 
 static void pgraph_finish_inline_buffer_vertex(PGRAPHState *pg)
 {
-    int i;
-
+    pgraph_check_within_begin_end_block(pg);
     assert(pg->inline_buffer_length < NV2A_MAX_BATCH_LENGTH);
 
-    for (i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+    for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         VertexAttribute *attribute = &pg->vertex_attributes[i];
         if (attribute->inline_buffer_populated) {
-            memcpy(&attribute->inline_buffer[
-                      pg->inline_buffer_length * 4],
-                   attribute->inline_value,
-                   sizeof(float) * 4);
+            memcpy(&attribute->inline_buffer[pg->inline_buffer_length * 4],
+                   attribute->inline_value, sizeof(float) * 4);
         }
     }
 
@@ -3961,6 +3969,7 @@ void pgraph_init(NV2AState *d)
 
     pg->depth_clamp_enable = false;
     pg->material_alpha = 0.0f;
+    pg->primitive_mode = PRIM_TYPE_INVALID;
 
     for (i=0; i<NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         VertexAttribute *attribute = &pg->vertex_attributes[i];
