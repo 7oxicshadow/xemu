@@ -2685,15 +2685,20 @@ DEF_METHOD_INC(NV097, SET_EYE_DIRECTION)
     pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_EYED] = true;
 }
 
+static void pgraph_reset_draw_arrays(PGRAPHState *pg)
+{
+    pg->draw_arrays_length = 0;
+    pg->draw_arrays_min_start = -1;
+    pg->draw_arrays_max_count = 0;
+    pg->draw_arrays_prevent_connect = false;
+}
+
 static void pgraph_reset_inline_buffers(PGRAPHState *pg)
 {
     pg->inline_elements_length = 0;
     pg->inline_array_length = 0;
     pg->inline_buffer_length = 0;
-    pg->draw_arrays_length = 0;
-    pg->draw_arrays_min_start = -1;
-    pg->draw_arrays_max_count = 0;
-    pg->draw_arrays_prevent_connect = false;
+    pgraph_reset_draw_arrays(pg);
 }
 
 static void pgraph_flush_draw(NV2AState *d)
@@ -3211,11 +3216,12 @@ static void pgraph_expand_draw_arrays(NV2AState *d)
     if (pg->draw_arrays_length > 1) {
         pgraph_flush_draw(d);
     }
-
     assert((pg->inline_elements_length + count) < NV2A_MAX_BATCH_LENGTH);
     for (unsigned int i = 0; i < count; i++) {
         pg->inline_elements[pg->inline_elements_length++] = start + i;
     }
+
+    pgraph_reset_draw_arrays(pg);
 }
 
 static void pgraph_check_within_begin_end_block(PGRAPHState *pg)
@@ -4543,7 +4549,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     if (cached_shader) {
         pg->shader_binding = cached_shader;
     } else {
-        pg->shader_binding = generate_shaders(state);
+        pg->shader_binding = generate_shaders(&state);
         nv2a_profile_inc_counter(NV2A_PROF_SHADER_GEN);
 
         /* cache it */
