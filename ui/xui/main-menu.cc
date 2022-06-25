@@ -292,24 +292,48 @@ void MainMenuInputView::Draw()
         switch (bound_state->bound)
         {
             case 0:
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_1_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_1_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
                 lstick_dz_ptr = &g_config.input.switches.controller_1_lsdz;
                 rstick_dz_ptr = &g_config.input.switches.controller_1_rsdz;
                 stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_1;
             break;
 
             case 2:
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_2_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_2_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
                 lstick_dz_ptr = &g_config.input.switches.controller_2_lsdz;
                 rstick_dz_ptr = &g_config.input.switches.controller_2_rsdz;
                 stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_2;
             break;
 
             case 3:
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_3_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_3_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
                 lstick_dz_ptr = &g_config.input.switches.controller_3_lsdz;
                 rstick_dz_ptr = &g_config.input.switches.controller_3_rsdz;
                 stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_3;
             break;
 
             case 4:
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_4_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_4_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
                 lstick_dz_ptr = &g_config.input.switches.controller_4_lsdz;
                 rstick_dz_ptr = &g_config.input.switches.controller_4_rsdz;
                 stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_4;

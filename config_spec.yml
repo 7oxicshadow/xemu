@@ -64,6 +64,30 @@ input:
     joy_start_offset_ctrl_4: 
       type: number
       default: 0
+    controller_1_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_1_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_2_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_2_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_3_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_3_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_4_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_4_rstick_inv_y:
+      type: bool
+      default: 0
   gamecontrollerdb_path: string
   auto_bind:
     type: bool

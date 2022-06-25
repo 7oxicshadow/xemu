@@ -518,6 +518,52 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
     state->axis[CONTROLLER_AXIS_RSTICK_X] = rstickx;
     state->axis[CONTROLLER_AXIS_RSTICK_Y] = rsticky;
 
+    /* process invert switches. This is done at the end so we dont have to mess with the deadzone checks
+       above */
+    if (state->bound >= 0){
+
+        switch(state->bound)
+        {
+            case 0:
+                if(true == g_config.input.switches.controller_1_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_1_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 1:
+                if(true == g_config.input.switches.controller_2_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_2_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 2:
+                if(true == g_config.input.switches.controller_3_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_3_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 3:
+                if(true == g_config.input.switches.controller_4_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_4_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            default:
+            break;
+        }
+    }
     //printf("%d    %d    %d    %d\n",lstickx, lsticky, rstickx, rsticky);
 }
 
