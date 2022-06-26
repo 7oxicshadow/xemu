@@ -161,6 +161,18 @@ void ShowMainMenu()
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Audio"))
+        {
+            int dsptmp = (int)g_config.audio.use_dsp;
+
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(ImColor(0, 220, 0, 80)));
+            ImGui::SliderFloat("Volume", &g_config.audio.volume_limit, 0, 1, "%.3f", 0);
+            ImGui::SliderInt("DSP Processing", &dsptmp, 0, 1, "Value %0f", 0);
+            ImGui::PopStyleColor();
+            g_config.audio.use_dsp = (bool)dsptmp;      
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Debug"))
         {
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
