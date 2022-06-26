@@ -21,6 +21,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include <locale.h>
 
 #include "shaders_common.h"
 #include "shaders.h"
@@ -74,7 +75,8 @@ static MString* generate_geometry_shader(
                                       enum ShaderPolygonMode polygon_front_mode,
                                       enum ShaderPolygonMode polygon_back_mode,
                                       enum ShaderPrimitiveMode primitive_mode,
-                                      GLenum *gl_primitive_mode)
+                                      GLenum *gl_primitive_mode,
+                                      bool smooth_shading)
 {
 
     /* FIXME: Missing support for 2-sided-poly mode */
@@ -102,10 +104,10 @@ static MString* generate_geometry_shader(
         assert(polygon_mode == POLY_MODE_LINE);
         layout_in = "layout(triangles) in;\n";
         layout_out = "layout(line_strip, max_vertices = 4) out;\n";
-        body = "  emit_vertex(0);\n"
-               "  emit_vertex(1);\n"
-               "  emit_vertex(2);\n"
-               "  emit_vertex(0);\n"
+        body = "  emit_vertex(0, 0);\n"
+               "  emit_vertex(1, 0);\n"
+               "  emit_vertex(2, 0);\n"
+               "  emit_vertex(0, 0);\n"
                "  EndPrimitive();\n";
         break;
     case PRIM_TYPE_TRIANGLE_STRIP:
@@ -118,15 +120,15 @@ static MString* generate_geometry_shader(
          * vertex we are using */
         body = "  if ((gl_PrimitiveIDIn & 1) == 0) {\n"
                "    if (gl_PrimitiveIDIn == 0) {\n"
-               "      emit_vertex(0);\n" /* bottom right */
+               "      emit_vertex(0, 0);\n" /* bottom right */
                "    }\n"
-               "    emit_vertex(1);\n" /* top right */
-               "    emit_vertex(2);\n" /* bottom left */
-               "    emit_vertex(0);\n" /* bottom right */
+               "    emit_vertex(1, 0);\n" /* top right */
+               "    emit_vertex(2, 0);\n" /* bottom left */
+               "    emit_vertex(0, 0);\n" /* bottom right */
                "  } else {\n"
-               "    emit_vertex(2);\n" /* bottom left */
-               "    emit_vertex(1);\n" /* top left */
-               "    emit_vertex(0);\n" /* top right */
+               "    emit_vertex(2, 0);\n" /* bottom left */
+               "    emit_vertex(1, 0);\n" /* top left */
+               "    emit_vertex(0, 0);\n" /* top right */
                "  }\n"
                "  EndPrimitive();\n";
         break;
@@ -137,11 +139,11 @@ static MString* generate_geometry_shader(
         layout_in = "layout(triangles) in;\n";
         layout_out = "layout(line_strip, max_vertices = 4) out;\n";
         body = "  if (gl_PrimitiveIDIn == 0) {\n"
-               "    emit_vertex(0);\n"
+               "    emit_vertex(0, 0);\n"
                "  }\n"
-               "  emit_vertex(1);\n"
-               "  emit_vertex(2);\n"
-               "  emit_vertex(0);\n"
+               "  emit_vertex(1, 0);\n"
+               "  emit_vertex(2, 0);\n"
+               "  emit_vertex(0, 0);\n"
                "  EndPrimitive();\n";
         break;
     case PRIM_TYPE_QUADS:
@@ -149,18 +151,18 @@ static MString* generate_geometry_shader(
         layout_in = "layout(lines_adjacency) in;\n";
         if (polygon_mode == POLY_MODE_LINE) {
             layout_out = "layout(line_strip, max_vertices = 5) out;\n";
-            body = "  emit_vertex(0);\n"
-                   "  emit_vertex(1);\n"
-                   "  emit_vertex(2);\n"
-                   "  emit_vertex(3);\n"
-                   "  emit_vertex(0);\n"
+            body = "  emit_vertex(0, 3);\n"
+                   "  emit_vertex(1, 3);\n"
+                   "  emit_vertex(2, 3);\n"
+                   "  emit_vertex(3, 3);\n"
+                   "  emit_vertex(0, 3);\n"
                    "  EndPrimitive();\n";
         } else if (polygon_mode == POLY_MODE_FILL) {
             layout_out = "layout(triangle_strip, max_vertices = 4) out;\n";
-            body = "  emit_vertex(0);\n"
-                   "  emit_vertex(1);\n"
-                   "  emit_vertex(3);\n"
-                   "  emit_vertex(2);\n"
+            body = "  emit_vertex(3, 3);\n"
+                   "  emit_vertex(0, 3);\n"
+                   "  emit_vertex(2, 3);\n"
+                   "  emit_vertex(1, 3);\n"
                    "  EndPrimitive();\n";
         } else {
             assert(false);
@@ -174,20 +176,20 @@ static MString* generate_geometry_shader(
             layout_out = "layout(line_strip, max_vertices = 5) out;\n";
             body = "  if ((gl_PrimitiveIDIn & 1) != 0) { return; }\n"
                    "  if (gl_PrimitiveIDIn == 0) {\n"
-                   "    emit_vertex(0);\n"
+                   "    emit_vertex(0, 3);\n"
                    "  }\n"
-                   "  emit_vertex(1);\n"
-                   "  emit_vertex(3);\n"
-                   "  emit_vertex(2);\n"
-                   "  emit_vertex(0);\n"
+                   "  emit_vertex(1, 3);\n"
+                   "  emit_vertex(3, 3);\n"
+                   "  emit_vertex(2, 3);\n"
+                   "  emit_vertex(0, 3);\n"
                    "  EndPrimitive();\n";
         } else if (polygon_mode == POLY_MODE_FILL) {
             layout_out = "layout(triangle_strip, max_vertices = 4) out;\n";
             body = "  if ((gl_PrimitiveIDIn & 1) != 0) { return; }\n"
-                   "  emit_vertex(0);\n"
-                   "  emit_vertex(1);\n"
-                   "  emit_vertex(2);\n"
-                   "  emit_vertex(3);\n"
+                   "  emit_vertex(0, 3);\n"
+                   "  emit_vertex(1, 3);\n"
+                   "  emit_vertex(2, 3);\n"
+                   "  emit_vertex(3, 3);\n"
                    "  EndPrimitive();\n";
         } else {
             assert(false);
@@ -197,12 +199,25 @@ static MString* generate_geometry_shader(
     case PRIM_TYPE_POLYGON:
         if (polygon_mode == POLY_MODE_LINE) {
             *gl_primitive_mode = GL_LINE_LOOP;
-        } else if (polygon_mode == POLY_MODE_FILL) {
+            return NULL;
+        }
+        if (polygon_mode == POLY_MODE_FILL) {
             *gl_primitive_mode = GL_TRIANGLE_FAN;
+            if (smooth_shading) {
+                return NULL;
+            }
+            layout_in = "layout(triangles) in;\n";
+            layout_out = "layout(triangle_strip, max_vertices = 3) out;\n";
+            body = "  emit_vertex(0, 2);\n"
+                   "  emit_vertex(1, 2);\n"
+                   "  emit_vertex(2, 2);\n"
+                   "  EndPrimitive();\n";
         } else {
             assert(false);
+            return NULL;
         }
-        return NULL;
+        break;
+
     default:
         assert(false);
         return NULL;
@@ -216,18 +231,52 @@ static MString* generate_geometry_shader(
                                   "\n");
     mstring_append(s, layout_in);
     mstring_append(s, layout_out);
+    mstring_append(s, "\n");
+    if (smooth_shading) {
+        mstring_append(s,
+                       STRUCT_V_VERTEX_DATA_IN_ARRAY_SMOOTH
+                       "\n"
+                       STRUCT_VERTEX_DATA_OUT_SMOOTH
+                       "\n"
+                       "void emit_vertex(int index, int _unused) {\n"
+                       "  gl_Position = gl_in[index].gl_Position;\n"
+                       "  gl_PointSize = gl_in[index].gl_PointSize;\n"
+                       "  vtx_inv_w = v_vtx_inv_w[index];\n"
+                       "  vtxD0 = v_vtxD0[index];\n"
+                       "  vtxD1 = v_vtxD1[index];\n"
+                       "  vtxB0 = v_vtxB0[index];\n"
+                       "  vtxB1 = v_vtxB1[index];\n"
+                       "  vtxFog = v_vtxFog[index];\n"
+                       "  vtxT0 = v_vtxT0[index];\n"
+                       "  vtxT1 = v_vtxT1[index];\n"
+                       "  vtxT2 = v_vtxT2[index];\n"
+                       "  vtxT3 = v_vtxT3[index];\n"
+                       "  EmitVertex();\n"
+                       "}\n");
+    } else {
+        mstring_append(s,
+                       STRUCT_V_VERTEX_DATA_IN_ARRAY_FLAT
+                       "\n"
+                       STRUCT_VERTEX_DATA_OUT_FLAT
+                       "\n"
+                       "void emit_vertex(int index, int provoking_index) {\n"
+                       "  gl_Position = gl_in[index].gl_Position;\n"
+                       "  gl_PointSize = gl_in[index].gl_PointSize;\n"
+                       "  vtx_inv_w = v_vtx_inv_w[index];\n"
+                       "  vtxD0 = v_vtxD0[provoking_index];\n"
+                       "  vtxD1 = v_vtxD1[provoking_index];\n"
+                       "  vtxB0 = v_vtxB0[provoking_index];\n"
+                       "  vtxB1 = v_vtxB1[provoking_index];\n"
+                       "  vtxFog = v_vtxFog[index];\n"
+                       "  vtxT0 = v_vtxT0[index];\n"
+                       "  vtxT1 = v_vtxT1[index];\n"
+                       "  vtxT2 = v_vtxT2[index];\n"
+                       "  vtxT3 = v_vtxT3[index];\n"
+                       "  EmitVertex();\n"
+                       "}\n");
+    }
+
     mstring_append(s, "\n"
-                      STRUCT_VERTEX_DATA
-                      "noperspective in VertexData v_vtx[];\n"
-                      "noperspective out VertexData g_vtx;\n"
-                      "\n"
-                      "void emit_vertex(int index) {\n"
-                      "  gl_Position = gl_in[index].gl_Position;\n"
-                      "  gl_PointSize = gl_in[index].gl_PointSize;\n"
-                      "  g_vtx = v_vtx[index];\n"
-                      "  EmitVertex();\n"
-                      "}\n"
-                      "\n"
                       "void main() {\n");
     mstring_append(s, body);
     mstring_append(s, "}\n");
@@ -693,17 +742,16 @@ GLSL_DEFINE(materialEmissionColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_CM_COL) ".xyz
                            state->surface_scale_factor);
     }
 
-
     mstring_append(body,
                    "  if (oPos.w == 0.0 || isinf(oPos.w)) {\n"
-                   "    vtx.inv_w = 1.0;\n"
+                   "    vtx_inv_w = 1.0;\n"
                    "  } else {\n"
-                   "    vtx.inv_w = 1.0 / oPos.w;\n"
+                   "    vtx_inv_w = 1.0 / oPos.w;\n"
                    "  }\n");
 }
 
 static MString *generate_vertex_shader(const ShaderState *state,
-                                       char vtx_prefix)
+                                       bool prefix_outputs)
 {
     int i;
     MString *header = mstring_from_str(
@@ -757,13 +805,28 @@ GLSL_DEFINE(texMat3, GLSL_C_MAT4(NV_IGRAPH_XF_XFCTX_T3MAT))
 "    float y = float(bitfieldExtract(cmp, 11, 11)) / 1023.0;\n"
 "    float z = float(bitfieldExtract(cmp, 22, 10)) / 511.0;\n"
 "    return vec4(x, y, z, 1);\n"
-"}\n"
-STRUCT_VERTEX_DATA);
-
-    mstring_append_fmt(header, "noperspective out VertexData %c_vtx;\n",
-                       vtx_prefix);
-    mstring_append_fmt(header, "#define vtx %c_vtx\n",
-                       vtx_prefix);
+"}\n");
+    if (prefix_outputs) {
+        mstring_append(header, state->smooth_shading ?
+                                   STRUCT_V_VERTEX_DATA_OUT_SMOOTH :
+                                   STRUCT_V_VERTEX_DATA_OUT_FLAT);
+        mstring_append(header,
+                       "#define vtx_inv_w v_vtx_inv_w\n"
+                       "#define vtxD0 v_vtxD0\n"
+                       "#define vtxD1 v_vtxD1\n"
+                       "#define vtxB0 v_vtxB0\n"
+                       "#define vtxB1 v_vtxB1\n"
+                       "#define vtxFog v_vtxFog\n"
+                       "#define vtxT0 v_vtxT0\n"
+                       "#define vtxT1 v_vtxT1\n"
+                       "#define vtxT2 v_vtxT2\n"
+                       "#define vtxT3 v_vtxT3\n"
+                       );
+    } else {
+        mstring_append(header, state->smooth_shading ?
+                                   STRUCT_VERTEX_DATA_OUT_SMOOTH :
+                                   STRUCT_VERTEX_DATA_OUT_FLAT);
+    }
     mstring_append(header, "\n");
     for (i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         if (state->compressed_attrs & (1 << i)) {
@@ -884,15 +947,15 @@ STRUCT_VERTEX_DATA);
 
     /* Set outputs */
     mstring_append(body, "\n"
-                      "  vtx.D0 = clamp(oD0, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.D1 = clamp(oD1, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.B0 = clamp(oB0, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.B1 = clamp(oB1, 0.0, 1.0) * vtx.inv_w;\n"
-                      "  vtx.Fog = oFog.x * vtx.inv_w;\n"
-                      "  vtx.T0 = oT0 * vtx.inv_w;\n"
-                      "  vtx.T1 = oT1 * vtx.inv_w;\n"
-                      "  vtx.T2 = oT2 * vtx.inv_w;\n"
-                      "  vtx.T3 = oT3 * vtx.inv_w;\n"
+                      "  vtxD0 = clamp(oD0, 0.0, 1.0) * vtx_inv_w;\n"
+                      "  vtxD1 = clamp(oD1, 0.0, 1.0) * vtx_inv_w;\n"
+                      "  vtxB0 = clamp(oB0, 0.0, 1.0) * vtx_inv_w;\n"
+                      "  vtxB1 = clamp(oB1, 0.0, 1.0) * vtx_inv_w;\n"
+                      "  vtxFog = oFog.x * vtx_inv_w;\n"
+                      "  vtxT0 = oT0 * vtx_inv_w;\n"
+                      "  vtxT1 = oT1 * vtx_inv_w;\n"
+                      "  vtxT2 = oT2 * vtx_inv_w;\n"
+                      "  vtxT3 = oT3 * vtx_inv_w;\n"
                       "  gl_Position = oPos;\n"
                       "  gl_PointSize = oPts.x;\n"
                       "\n"
@@ -941,12 +1004,19 @@ static GLuint create_gl_shader(GLenum gl_shader_type,
     return shader;
 }
 
-ShaderBinding* generate_shaders(const ShaderState *state)
+ShaderBinding *generate_shaders(const ShaderState *state)
 {
     int i, j;
     char tmp[64];
 
-    char vtx_prefix;
+    char *previous_numeric_locale = setlocale(LC_NUMERIC, NULL);
+    if (previous_numeric_locale) {
+        previous_numeric_locale = g_strdup(previous_numeric_locale);
+    }
+
+    /* Ensure numeric values are printed with '.' radix, no grouping */
+    setlocale(LC_NUMERIC, "C");
+
     GLuint program = glCreateProgram();
 
     /* Create an option geometry shader and find primitive type */
@@ -955,7 +1025,8 @@ ShaderBinding* generate_shaders(const ShaderState *state)
         generate_geometry_shader(state->polygon_front_mode,
                                  state->polygon_back_mode,
                                  state->primitive_mode,
-                                 &gl_primitive_mode);
+                                 &gl_primitive_mode,
+                                 state->smooth_shading);
     if (geometry_shader_code) {
         const char* geometry_shader_code_str =
              mstring_get_str(geometry_shader_code);
@@ -964,13 +1035,11 @@ ShaderBinding* generate_shaders(const ShaderState *state)
                                                   "geometry shader");
         glAttachShader(program, geometry_shader);
         mstring_unref(geometry_shader_code);
-        vtx_prefix = 'v';
-    } else {
-        vtx_prefix = 'g';
     }
 
     /* create the vertex shader */
-    MString *vertex_shader_code = generate_vertex_shader(state, vtx_prefix);
+    MString *vertex_shader_code =
+        generate_vertex_shader(state, geometry_shader_code != NULL);
     GLuint vertex_shader = create_gl_shader(GL_VERTEX_SHADER,
                                             mstring_get_str(vertex_shader_code),
                                             "vertex shader");
@@ -979,7 +1048,8 @@ ShaderBinding* generate_shaders(const ShaderState *state)
 
     /* generate a fragment shader from register combiners */
     MString *fragment_shader_code = psh_translate(state->psh);
-    const char *fragment_shader_code_str = mstring_get_str(fragment_shader_code);
+    const char *fragment_shader_code_str =
+        mstring_get_str(fragment_shader_code);
     GLuint fragment_shader = create_gl_shader(GL_FRAGMENT_SHADER,
                                               fragment_shader_code_str,
                                               "fragment shader");
@@ -1072,14 +1142,17 @@ ShaderBinding* generate_shaders(const ShaderState *state)
     }
     for (i = 0; i < NV2A_MAX_LIGHTS; i++) {
         snprintf(tmp, sizeof(tmp), "lightInfiniteHalfVector%d", i);
-        ret->light_infinite_half_vector_loc[i] = glGetUniformLocation(program, tmp);
+        ret->light_infinite_half_vector_loc[i] =
+            glGetUniformLocation(program, tmp);
         snprintf(tmp, sizeof(tmp), "lightInfiniteDirection%d", i);
-        ret->light_infinite_direction_loc[i] = glGetUniformLocation(program, tmp);
+        ret->light_infinite_direction_loc[i] =
+            glGetUniformLocation(program, tmp);
 
         snprintf(tmp, sizeof(tmp), "lightLocalPosition%d", i);
         ret->light_local_position_loc[i] = glGetUniformLocation(program, tmp);
         snprintf(tmp, sizeof(tmp), "lightLocalAttenuation%d", i);
-        ret->light_local_attenuation_loc[i] = glGetUniformLocation(program, tmp);
+        ret->light_local_attenuation_loc[i] =
+            glGetUniformLocation(program, tmp);
     }
     for (i = 0; i < 8; i++) {
         snprintf(tmp, sizeof(tmp), "clipRegion[%d]", i);
@@ -1087,9 +1160,15 @@ ShaderBinding* generate_shaders(const ShaderState *state)
     }
 
     if (state->fixed_function) {
-        ret->material_alpha_loc = glGetUniformLocation(program, "material_alpha");
+        ret->material_alpha_loc =
+            glGetUniformLocation(program, "material_alpha");
     } else {
         ret->material_alpha_loc = -1;
+    }
+
+    if (previous_numeric_locale) {
+        setlocale(LC_NUMERIC, previous_numeric_locale);
+        g_free(previous_numeric_locale);
     }
 
     return ret;

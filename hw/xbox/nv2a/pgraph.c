@@ -1841,6 +1841,23 @@ DEF_METHOD(NV097, SET_STENCIL_OP_ZPASS)
              kelvin_map_stencil_op(parameter));
 }
 
+DEF_METHOD(NV097, SET_SHADE_MODE)
+{
+    switch (parameter) {
+    case NV097_SET_SHADE_MODE_V_FLAT:
+        SET_MASK(pg->regs[NV_PGRAPH_CONTROL_3], NV_PGRAPH_CONTROL_3_SHADEMODE,
+                 NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT);
+        break;
+    case NV097_SET_SHADE_MODE_V_SMOOTH:
+        SET_MASK(pg->regs[NV_PGRAPH_CONTROL_3], NV_PGRAPH_CONTROL_3_SHADEMODE,
+                 NV_PGRAPH_CONTROL_3_SHADEMODE_SMOOTH);
+        break;
+    default:
+        /* Discard */
+        break;
+    }
+}
+
 DEF_METHOD(NV097, SET_POLYGON_OFFSET_SCALE_FACTOR)
 {
     pg->regs[NV_PGRAPH_ZOFFSETFACTOR] = parameter;
@@ -2974,6 +2991,12 @@ DEF_METHOD(NV097, SET_BEGIN_END)
             glDisable(GL_DEPTH_CLAMP);
         }
 
+        if (GET_MASK(pg->regs[NV_PGRAPH_CONTROL_3],
+                     NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+            NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT) {
+            glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
+        }
+
         if (stencil_test) {
             glEnable(GL_STENCIL_TEST);
 
@@ -4003,6 +4026,8 @@ void pgraph_init(NV2AState *d)
 
     pg->depth_clamp_enable = false;
     pg->material_alpha = 0.0f;
+    SET_MASK(pg->regs[NV_PGRAPH_CONTROL_3], NV_PGRAPH_CONTROL_3_SHADEMODE,
+         NV_PGRAPH_CONTROL_3_SHADEMODE_SMOOTH);
     pg->primitive_mode = PRIM_TYPE_INVALID;
 
     for (i=0; i<NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
@@ -4451,6 +4476,11 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     state.polygon_back_mode = (enum ShaderPolygonMode)GET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
                                                           NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
 
+    state.smooth_shading = GET_MASK(pg->regs[NV_PGRAPH_CONTROL_3],
+                                      NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                             NV_PGRAPH_CONTROL_3_SHADEMODE_SMOOTH;
+    state.psh.smooth_shading = state.smooth_shading;
+
     state.program_length = 0;
 
     if (vertex_program) {
@@ -4536,11 +4566,44 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
 
         state.psh.alphakill[i] = ctl_0 & NV_PGRAPH_TEXCTL0_0_ALPHAKILLEN;
 
-        unsigned int color_format =
-            GET_MASK(pg->regs[NV_PGRAPH_TEXFMT0 + i*4],
-                     NV_PGRAPH_TEXFMT0_COLOR);
+        uint32_t tex_fmt = pg->regs[NV_PGRAPH_TEXFMT0 + i*4];
+        unsigned int color_format = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_COLOR);
         ColorFormatInfo f = kelvin_color_format_map[color_format];
         state.psh.rect_tex[i] = f.linear;
+
+        uint32_t border_source = GET_MASK(tex_fmt,
+                                          NV_PGRAPH_TEXFMT0_BORDER_SOURCE);
+        bool cubemap = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_CUBEMAPENABLE);
+        state.psh.border_logical_size[i][0] = 0.0f;
+        state.psh.border_logical_size[i][1] = 0.0f;
+        if (border_source != NV_PGRAPH_TEXFMT0_BORDER_SOURCE_COLOR) {
+            if (!f.linear && !cubemap) {
+                // The actual texture will be (at least) double the reported
+                // size and shifted by a 4 texel border but texture coordinates
+                // will still be relative to the reported size.
+                unsigned int reported_width =
+                        1 << GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_U);
+                unsigned int reported_height =
+                        1 << GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_V);
+                state.psh.border_logical_size[i][0] = reported_width;
+                state.psh.border_logical_size[i][1] = reported_height;
+                if (reported_width < 8) {
+                    state.psh.border_inv_real_size[i][0] = 0.0625f;
+                } else {
+                    state.psh.border_inv_real_size[i][0] =
+                            1.0f / (reported_width * 2.0f);
+                }
+                if (reported_height < 8) {
+                    state.psh.border_inv_real_size[i][1] = 0.0625f;
+                } else {
+                    state.psh.border_inv_real_size[i][1] =
+                            1.0f / (reported_height * 2.0f);
+                }
+            } else {
+                NV2A_UNIMPLEMENTED("Border source texture with linear %d cubemap %d",
+                                   f.linear, cubemap);
+            }
+        }
 
         /* Keep track of whether texture data has been loaded as signed
          * normalized integers or not. This dictates whether or not we will need
@@ -6740,6 +6803,7 @@ static void pgraph_bind_textures(NV2AState *d)
         state.min_mipmap_level = min_mipmap_level;
         state.max_mipmap_level = max_mipmap_level;
         state.pitch = pitch;
+        state.border = border_source != NV_PGRAPH_TEXFMT0_BORDER_SOURCE_COLOR;
 
         /*
          * Check active surfaces to see if this texture was a render target
@@ -6877,7 +6941,7 @@ static void pgraph_bind_textures(NV2AState *d)
         }
 
         /* FIXME: Only upload if necessary? [s, t or r = GL_CLAMP_TO_BORDER] */
-        if (border_source == NV_PGRAPH_TEXFMT0_BORDER_SOURCE_COLOR) {
+        if (!state.border) {
             GLfloat gl_border_color[] = {
                 /* FIXME: Color channels might be wrong order */
                 ((border_color >> 16) & 0xFF) / 255.0f, /* red */
@@ -7293,6 +7357,15 @@ static void upload_gl_texture(GLenum gl_target,
     ColorFormatInfo f = kelvin_color_format_map[s.color_format];
     nv2a_profile_inc_counter(NV2A_PROF_TEX_UPLOAD);
 
+    unsigned int adjusted_width = s.width;
+    unsigned int adjusted_height = s.height;
+    unsigned int adjusted_pitch = s.pitch;
+    if (!f.linear && s.border) {
+        adjusted_width = MAX(16, adjusted_width * 2);
+        adjusted_height = MAX(16, adjusted_height * 2);
+        adjusted_pitch = adjusted_width * (s.pitch / s.width);
+    }
+
     switch(gl_target) {
     case GL_TEXTURE_1D:
         assert(false);
@@ -7303,11 +7376,13 @@ static void upload_gl_texture(GLenum gl_target,
 
         uint8_t *converted = convert_texture_data(s, texture_data,
                                                   palette_data,
-                                                  s.width, s.height, 1,
-                                                  s.pitch, 0);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, converted ? 0 : s.pitch / f.bytes_per_pixel);
+                                                  adjusted_width,
+                                                  adjusted_height, 1,
+                                                  adjusted_pitch, 0);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH,
+                      converted ? 0 : adjusted_pitch / f.bytes_per_pixel);
         glTexImage2D(gl_target, 0, f.gl_internal_format,
-                     s.width, s.height, 0,
+                     adjusted_width, adjusted_height, 0,
                      f.gl_format, f.gl_type,
                      converted ? converted : texture_data);
 
@@ -7326,7 +7401,7 @@ static void upload_gl_texture(GLenum gl_target,
     case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
     case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z: {
 
-        unsigned int width = s.width, height = s.height;
+        unsigned int width = adjusted_width, height = adjusted_height;
 
         int level;
         for (level = 0; level < s.levels; level++) {
@@ -7346,11 +7421,34 @@ static void upload_gl_texture(GLenum gl_target,
                 uint8_t *converted = decompress_2d_texture_data(
                     f.gl_internal_format, texture_data, physical_width,
                     physical_height);
-                glTexImage2D(gl_target, level, GL_RGBA, width, height, 0,
+                unsigned int tex_width = width;
+                unsigned int tex_height = height;
+
+                if (s.cubemap && adjusted_width != s.width) {
+                    // FIXME: Consider preserving the border.
+                    // There does not seem to be a way to reference the border
+                    // texels in a cubemap, so they are discarded.
+                    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 4);
+                    glPixelStorei(GL_UNPACK_SKIP_ROWS, 4);
+                    tex_width = s.width;
+                    tex_height = s.height;
+                    if (physical_width == width) {
+                        glPixelStorei(GL_UNPACK_ROW_LENGTH, adjusted_width);
+                    }
+                }
+
+                glTexImage2D(gl_target, level, GL_RGBA, tex_width, tex_height, 0,
                              GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, converted);
                 g_free(converted);
                 if (physical_width != width) {
                     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                }
+                if (s.cubemap && adjusted_width != s.width) {
+                    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+                    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+                    if (physical_width == width) {
+                        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                    }
                 }
                 texture_data +=
                     physical_width / 4 * physical_height / 4 * block_size;
@@ -7363,9 +7461,26 @@ static void upload_gl_texture(GLenum gl_target,
                                                           palette_data,
                                                           width, height, 1,
                                                           pitch, 0);
-                glTexImage2D(gl_target, level, f.gl_internal_format, width,
-                             height, 0, f.gl_format, f.gl_type,
-                             converted ? converted : unswizzled);
+                uint8_t *pixel_data = converted ? converted : unswizzled;
+                unsigned int tex_width = width;
+                unsigned int tex_height = height;
+
+                if (s.cubemap && adjusted_width != s.width) {
+                    // FIXME: Consider preserving the border.
+                    // There does not seem to be a way to reference the border
+                    // texels in a cubemap, so they are discarded.
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, adjusted_width);
+                    tex_width = s.width;
+                    tex_height = s.height;
+                    pixel_data += 4 * f.bytes_per_pixel + 4 * pitch;
+                }
+
+                glTexImage2D(gl_target, level, f.gl_internal_format, tex_width,
+                             tex_height, 0, f.gl_format, f.gl_type,
+                             pixel_data);
+                if (s.cubemap && s.border) {
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                }
                 if (converted) {
                     g_free(converted);
                 }
@@ -7382,7 +7497,9 @@ static void upload_gl_texture(GLenum gl_target,
     }
     case GL_TEXTURE_3D: {
 
-        unsigned int width = s.width, height = s.height, depth = s.depth;
+        unsigned int width = adjusted_width;
+        unsigned int height = adjusted_height;
+        unsigned int depth = s.depth;
 
         assert(f.linear == false);
 
@@ -7515,7 +7632,13 @@ static TextureBinding* generate_texture(const TextureShape s,
         }
 
         size_t length = 0;
-        unsigned int w = s.width, h = s.height;
+        unsigned int w = s.width;
+        unsigned int h = s.height;
+        if (!f.linear && s.border) {
+            w = MAX(16, w * 2);
+            h = MAX(16, h * 2);
+        }
+
         int level;
         for (level = 0; level < s.levels; level++) {
             if (f.gl_format == 0) {

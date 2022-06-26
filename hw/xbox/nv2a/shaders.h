@@ -97,6 +97,8 @@ typedef struct ShaderState {
     bool point_params_enable;
     float point_size;
     float point_params[8];
+
+    bool smooth_shading;
 } ShaderState;
 
 typedef struct ShaderBinding {
@@ -134,6 +136,6 @@ typedef struct ShaderBinding {
     GLint material_alpha_loc;
 } ShaderBinding;
 
-ShaderBinding* generate_shaders(const ShaderState *state);
+ShaderBinding *generate_shaders(const ShaderState *state);
 
 #endif
