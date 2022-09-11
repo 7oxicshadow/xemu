@@ -454,8 +454,6 @@ static bool vertex_cache_entry_compare(Lru *lru, LruNode *node, void *key)
 
 static void pgraph_mark_textures_possibly_dirty(NV2AState *d, hwaddr addr, hwaddr size);
 static bool pgraph_check_texture_dirty(NV2AState *d, hwaddr addr, hwaddr size);
-static guint shader_hash(gconstpointer key);
-static gboolean shader_equal(gconstpointer a, gconstpointer b);
 static unsigned int kelvin_map_stencil_op(uint32_t parameter);
 static unsigned int kelvin_map_polygon_mode(uint32_t parameter);
 static unsigned int kelvin_map_texgen(uint32_t parameter, unsigned int channel);
@@ -3964,10 +3962,12 @@ void pgraph_init(NV2AState *d)
     pg->clearing = false;
 
     qemu_mutex_init(&pg->lock);
+    qemu_mutex_init(&pg->shader_cache_lock);
     qemu_event_init(&pg->gl_sync_complete, false);
     qemu_event_init(&pg->downloads_complete, false);
     qemu_event_init(&pg->dirty_surfaces_download_complete, false);
     qemu_event_init(&pg->flush_complete, false);
+    qemu_event_init(&pg->shader_cache_writeback_complete, false);
 
     /* fire up opengl */
     glo_set_current(g_nv2a_context_render);
@@ -4024,7 +4024,7 @@ void pgraph_init(NV2AState *d)
     pg->element_cache.init_node = vertex_cache_entry_init;
     pg->element_cache.compare_nodes = vertex_cache_entry_compare;
 
-    pg->shader_cache = g_hash_table_new(shader_hash, shader_equal);
+    shader_cache_init(pg);
 
     pg->depth_clamp_enable = false;
     pg->material_alpha = 0.0f;
@@ -4063,6 +4063,7 @@ void pgraph_init(NV2AState *d)
 void pgraph_destroy(PGRAPHState *pg)
 {
     qemu_mutex_destroy(&pg->lock);
+    qemu_mutex_destroy(&pg->shader_cache_lock);
 
     glo_set_current(g_nv2a_context_render);
 
@@ -4070,7 +4071,9 @@ void pgraph_destroy(PGRAPHState *pg)
 
     glDeleteFramebuffers(1, &pg->gl_framebuffer);
 
-    // TODO: clear out shader cached
+    // Clear out shader cache
+    shader_write_cache_reload_list(pg);
+    free(pg->shader_cache_entries);
 
     // Clear out texture cache
     lru_flush(&pg->texture_cache);
@@ -4650,19 +4653,24 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         state.psh.conv_tex[i] = kernel;
     }
 
-    ShaderBinding* cached_shader = (ShaderBinding*)g_hash_table_lookup(pg->shader_cache, &state);
-    if (cached_shader) {
-        pg->shader_binding = cached_shader;
+    uint64_t shader_state_hash = fast_hash((uint8_t*) &state, sizeof(ShaderState));
+    qemu_mutex_lock(&pg->shader_cache_lock);
+    LruNode *node = lru_lookup(&pg->shader_cache, shader_state_hash, &state);
+    ShaderLruNode *snode = container_of(node, ShaderLruNode, node);
+    if (snode->binding || shader_load_from_memory(snode)) {
+        pg->shader_binding = snode->binding;
     } else {
         pg->shader_binding = generate_shaders(&state);
         nv2a_profile_inc_counter(NV2A_PROF_SHADER_GEN);
 
         /* cache it */
-        ShaderState *cache_state = (ShaderState *)g_malloc(sizeof(*cache_state));
-        memcpy(cache_state, &state, sizeof(*cache_state));
-        g_hash_table_insert(pg->shader_cache, cache_state,
-                            (gpointer)pg->shader_binding);
+        snode->binding = pg->shader_binding;
+        if (g_config.perf.cache_shaders) {
+            shader_cache_to_disk(snode);
+        }
     }
+
+    qemu_mutex_unlock(&pg->shader_cache_lock);
 
     binding_changed = (pg->shader_binding != old_binding);
     if (binding_changed) {
@@ -5672,16 +5680,38 @@ static void pgraph_download_surface_data_to_buffer_no_scale(
         /* FIXME: Allocate big buffer up front and re-alloc if necessary.
          * FIXME: Consider swizzle in shader
          */
-        assert(pg->surface_scale_factor == 1);
-        gl_read_buf = (uint8_t *)g_malloc(surface->height * surface->pitch);
+
+        assert(pg->surface_scale_factor == 1 || downscale);
+        swizzle_buf = (uint8_t *)g_malloc(surface->size);
+        gl_read_buf = swizzle_buf;
     }
 
-    glo_readpixels(surface->fmt.gl_format, surface->fmt.gl_type,
-                   surface->fmt.bytes_per_pixel,
-                   surface->pitch * pg->surface_scale_factor,
-                   surface->width * pg->surface_scale_factor,
-                   surface->height * pg->surface_scale_factor,
-                   flip, gl_read_buf);
+    if (downscale) {
+        pg->scale_buf = (uint8_t *)g_realloc(
+            pg->scale_buf, pg->surface_scale_factor * pg->surface_scale_factor *
+                               surface->size);
+        gl_read_buf = pg->scale_buf;
+    }
+
+    glo_readpixels(
+        surface->fmt.gl_format, surface->fmt.gl_type, surface->fmt.bytes_per_pixel,
+        pg->surface_scale_factor * surface->pitch,
+        pg->surface_scale_factor * surface->width,
+        pg->surface_scale_factor * surface->height, flip, gl_read_buf);
+
+    /* FIXME: Replace this with a hw accelerated version */
+    if (downscale) {
+        assert(surface->pitch >= (surface->width * surface->fmt.bytes_per_pixel));
+        uint8_t *out = swizzle_buf, *in = pg->scale_buf;
+        for (unsigned int y = 0; y < surface->height; y++) {
+            surface_copy_shrink_row(out, in, surface->width,
+                                    surface->fmt.bytes_per_pixel,
+                                    pg->surface_scale_factor);
+            in += surface->pitch * pg->surface_scale_factor *
+                  pg->surface_scale_factor;
+            out += surface->pitch;
+        }
+    }
 
     if (swizzle) {
         swizzle_rect(gl_read_buf, surface->width, surface->height, pixels,
@@ -6192,9 +6222,8 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
     entry->vram_addr = dma.address + surface->offset;
     entry->width = width;
     entry->height = height;
-    entry->pitch = entry->swizzle ? (entry->width * entry->fmt.bytes_per_pixel)
-                                  : surface->pitch;
-    entry->size = height * surface->pitch;
+    entry->pitch = surface->pitch;
+    entry->size = height * MAX(surface->pitch, width * fmt.bytes_per_pixel);
     entry->upload_pending = true;
     entry->download_pending = false;
     entry->draw_dirty = false;
@@ -7848,17 +7877,6 @@ static bool texture_cache_entry_compare(Lru *lru, LruNode *node, void *key)
 {
     TextureLruNode *tnode = container_of(node, TextureLruNode, node);
     return memcmp(&tnode->key, key, sizeof(TextureKey));
-}
-
-/* hash and equality for shader cache hash table */
-static guint shader_hash(gconstpointer key)
-{
-    return fast_hash((const uint8_t *)key, sizeof(ShaderState));
-}
-static gboolean shader_equal(gconstpointer a, gconstpointer b)
-{
-    const ShaderState *as = (const ShaderState *)a, *bs = (const ShaderState *)b;
-    return memcmp(as, bs, sizeof(ShaderState)) == 0;
 }
 
 static unsigned int kelvin_map_stencil_op(uint32_t parameter)
