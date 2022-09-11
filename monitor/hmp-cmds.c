@@ -59,6 +59,7 @@
 #include "hw/intc/intc.h"
 #include "migration/snapshot.h"
 #include "migration/misc.h"
+#include "ui/xemu-settings.h"
 
 #ifdef CONFIG_SPICE
 #include <spice/enums.h>
@@ -2760,4 +2761,34 @@ void hmp_virtio_queue_element(Monitor *mon, const QDict *qdict)
     monitor_printf(mon, "    idx:   %d\n", e->used->idx);
 
     qapi_free_VirtioQueueElement(e);
+void hmp_showfps(Monitor *mon, const QDict *qdict)
+{
+    int value = qdict_get_try_int(qdict, "value", 0);
+
+    //if we did not get a value of 1 it was either out of range or 0
+    //assume 0 in all cases.
+    if ( value != 1 ) {
+        value = 0;
+    }
+
+    g_config.display.ui.ui_show_fps_bool = value;
+    xemu_settings_save();
+}
+
+void hmp_customratio(Monitor *mon, const QDict *qdict)
+{
+    const char *value = qdict_get_str(qdict, "string");
+
+    /* Check if we got an invalid conversion */
+    if( strtof(value, NULL) == 0.0f )
+    {
+        /* Invalid conversion, force 4:3 */
+        xemu_settings_set_string(&g_config.display.ui.custom_ratio, "1.333333333");
+    }
+    else
+    {
+        xemu_settings_set_string(&g_config.display.ui.custom_ratio, value);
+    }
+
+    xemu_settings_save();
 }

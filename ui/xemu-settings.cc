@@ -38,7 +38,7 @@
 
 struct config g_config;
 
-static const char *filename = "xemu.toml";
+static const char *filename = "xemu_ts.toml";
 static const char *settings_path;
 static std::string error_msg;
 
