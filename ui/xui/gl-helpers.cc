@@ -716,6 +716,8 @@ float GetDisplayAspectRatio(int width, int height)
         return 16.0f/9.0f;
     case CONFIG_DISPLAY_UI_ASPECT_RATIO_4X3:
         return 4.0f/3.0f;
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_CUSTOM:
+        return strtof(g_config.display.ui.custom_ratio, NULL);
     case CONFIG_DISPLAY_UI_ASPECT_RATIO_AUTO:
     default:
         return xemu_get_widescreen() ? 16.0f/9.0f : 4.0f/3.0f;
@@ -772,10 +774,6 @@ bool RenderFramebufferToPng(GLuint tex, bool flip, std::vector<uint8_t> &png, in
     if (!max_height) max_height = height;
     ScaleDimensions(width, height, max_width, max_height, &width, &height);
     
-    if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_CUSTOM) {
-        width = height * strtof(g_config.display.ui.custom_ratio, NULL);
-    }
-
     std::vector<uint8_t> pixels;
     pixels.resize(width * height * 3);
 

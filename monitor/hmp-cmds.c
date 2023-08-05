@@ -2761,6 +2761,8 @@ void hmp_virtio_queue_element(Monitor *mon, const QDict *qdict)
     monitor_printf(mon, "    idx:   %d\n", e->used->idx);
 
     qapi_free_VirtioQueueElement(e);
+}
+
 void hmp_showfps(Monitor *mon, const QDict *qdict)
 {
     int value = qdict_get_try_int(qdict, "value", 0);
