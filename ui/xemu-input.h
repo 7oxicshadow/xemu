@@ -71,6 +71,7 @@ typedef struct ControllerState {
 
     // Input state
     uint16_t buttons;
+    uint8_t button_ana[6];
     int16_t  axis[CONTROLLER_AXIS__COUNT];
 
     // Rendering state hacked on here for convenience but needs to be moved (FIXME)
@@ -113,6 +114,7 @@ int xemu_input_get_controller_default_bind_port(ControllerState *state, int star
 
 void xemu_input_set_test_mode(int enabled);
 int xemu_input_get_test_mode(void);
+void xemu_mount_xmu(int card);
 
 #ifdef __cplusplus
 }
