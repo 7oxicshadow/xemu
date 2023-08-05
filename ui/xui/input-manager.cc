@@ -32,20 +32,6 @@ void InputManager::Update()
 
     // If the mouse is moved, wake the ui
     ImVec2 current_mouse_pos = ImGui::GetMousePos();
-
-    /* Evaluate this first, last mouse pos will be set later */
-    m_mouse_moved_only = false;
-    if ((current_mouse_pos.x != m_last_mouse_pos.x) ||
-        (current_mouse_pos.y != m_last_mouse_pos.y)) {
-        m_mouse_moved_only = true;
-    }
-
-    m_mouse_clicked_only = false;
-    if ( ImGui::IsMouseDown(0) || ImGui::IsMouseDown(1) || ImGui::IsMouseDown(2) ){
-        m_mouse_clicked_only = true;
-        m_navigating_with_controller = false;
-    }
-
     m_mouse_moved = false;
     if ((current_mouse_pos.x != m_last_mouse_pos.x) ||
         (current_mouse_pos.y != m_last_mouse_pos.y) ||

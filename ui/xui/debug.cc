@@ -230,7 +230,6 @@ DebugVideoWindow::DebugVideoWindow()
 {
     m_is_open = false;
     m_transparent = false;
-    m_position_restored = false;
 }
 
 void DebugVideoWindow::Draw()
@@ -238,19 +237,9 @@ void DebugVideoWindow::Draw()
     if (!m_is_open)
         return;
 
-    if( !m_position_restored )
-    {
-        ImGui::SetNextWindowPos(ImVec2(g_config.display.debug.video_x_pos, g_config.display.debug.video_y_pos), 
-                                ImGuiCond_Once, ImVec2(0, 0) );
-        m_transparent = g_config.display.debug.video_transparency;
-        m_position_restored = true;
-    }
-
     float alpha = m_transparent ? 0.2 : 1.0;
     PushWindowTransparencySettings(m_transparent, 0.2);
-    ImGui::SetNextWindowSize(ImVec2(g_config.display.debug.video_x_winsize*g_viewport_mgr.m_scale, 
-                                    g_config.display.debug.video_y_winsize*g_viewport_mgr.m_scale), 
-                                    ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(600.0f*g_viewport_mgr.m_scale, 150.0f*g_viewport_mgr.m_scale), ImGuiCond_Once);
     if (ImGui::Begin("Video Debug", &m_is_open)) {
         double x_start, x_end;
         static ImPlotAxisFlags rt_axis = ImPlotAxisFlags_NoTickLabels;
@@ -298,10 +287,7 @@ void DebugVideoWindow::Draw()
         }
         ImPlot::PopStyleColor();
 
-        ImGui::SetNextItemOpen(g_config.display.debug.video_advancedtree_state, ImGuiCond_Once);
-        g_config.display.debug.video_advancedtree_state = ImGui::TreeNode("Advanced");
-
-        if (g_config.display.debug.video_advancedtree_state) {
+        if (ImGui::TreeNode("Advanced")) {
             ImGui::SetNextWindowBgAlpha(alpha);
             if (ImPlot::BeginPlot("##ScrollingDraws", ImVec2(-1,-1))) {
                 ImPlot::SetupAxes(NULL, NULL, ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
@@ -340,66 +326,10 @@ void DebugVideoWindow::Draw()
         }
 
         ImPlot::PopStyleVar(2);
-
-        ImVec2 dbgwinpos = ImGui::GetWindowPos();
-        g_config.display.debug.video_x_pos = dbgwinpos.x;
-        g_config.display.debug.video_y_pos = dbgwinpos.y;
-
-        ImVec2 dbgwinsize = ImGui::GetWindowSize();
-        g_config.display.debug.video_x_winsize = dbgwinsize.x;
-        g_config.display.debug.video_y_winsize = dbgwinsize.y;
-        g_config.display.debug.video_transparency = m_transparent;
     }
     ImGui::End();
     ImGui::PopStyleColor(5);
 }
 
-FPSManager::FPSManager()
-{
-    active = true;
-}
-
-void FPSManager::Draw()
-{
-    const float DISTANCE = 10.0f;
-    static int corner = 0;
-    ImGuiIO& io = ImGui::GetIO();
-    if (corner != -1)
-    {
-        ImVec2 window_pos = ImVec2((corner & 1) ? io.DisplaySize.x - DISTANCE : DISTANCE, (corner & 2) ? io.DisplaySize.y - DISTANCE : DISTANCE);
-        window_pos.y = g_main_menu_height + DISTANCE;
-        ImVec2 window_pos_pivot = ImVec2((corner & 1) ? 1.0f : 0.0f, (corner & 2) ? 1.0f : 0.0f);
-        ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
-    }
-
-    float fade = 1.0;
-
-    ImVec4 color = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
-    color.w *= fade;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
-    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0,0,0,fade*0.9f));
-    ImGui::PushStyleColor(ImGuiCol_Border, color);
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
-    ImGui::SetNextWindowBgAlpha(0.90f * fade);
-    if (ImGui::Begin("FPSOverlay", NULL,
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoDecoration |
-        ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoNav |
-        ImGuiWindowFlags_NoInputs
-        ))
-    {
-        ImGui::Text("FPS %d", g_nv2a_stats.increment_fps);
-    }
-    ImGui::PopStyleColor();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
-    ImGui::End();
-}
-
 DebugApuWindow apu_window;
 DebugVideoWindow video_window;
-FPSManager FPSManager_window;

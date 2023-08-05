@@ -31,22 +31,10 @@ class DebugVideoWindow
 public:
     bool m_is_open;
     bool m_transparent;
-    bool m_position_restored;
 
     DebugVideoWindow();
     void Draw();
 };
 
-class FPSManager
-{
-private:
-    bool active;
-
-public:
-    FPSManager();
-    void Draw();
-};
-
 extern DebugApuWindow apu_window;
 extern DebugVideoWindow video_window;
-extern FPSManager FPSManager_window;

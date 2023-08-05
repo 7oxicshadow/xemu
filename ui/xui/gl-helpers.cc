@@ -771,10 +771,6 @@ bool RenderFramebufferToPng(GLuint tex, bool flip, std::vector<uint8_t> &png, in
     if (!max_width) max_width = width;
     if (!max_height) max_height = height;
     ScaleDimensions(width, height, max_width, max_height, &width, &height);
-    
-    if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_SCALE_CUSTOM) {
-        width = height * strtof(g_config.display.ui.custom_ratio, NULL);
-    }
 
     std::vector<uint8_t> pixels;
     pixels.resize(width * height * 3);

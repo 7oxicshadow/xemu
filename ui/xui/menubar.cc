@@ -28,7 +28,6 @@
 #include "compat.hh"
 #include "update.hh"
 #include "../xemu-os-utils.h"
-#include "ui/xemu-input.h"
 
 extern float g_main_menu_height; // FIXME
 
@@ -192,7 +191,7 @@ void ShowMainMenu()
             }
 
             ImGui::Combo("Display Mode", &g_config.display.ui.fit,
-                         "Center\0Scale\0Scale (Custom)\0Stretch\0");
+                         "Center\0Scale\0Stretch\0");
             ImGui::SameLine();
             HelpMarker("Controls how the rendered content should be scaled "
                        "into the window");
@@ -206,18 +205,6 @@ void ShowMainMenu()
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Audio"))
-        {
-            int dsptmp = (int)g_config.audio.use_dsp;
-
-            ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(ImColor(0, 220, 0, 80)));
-            ImGui::SliderFloat("Volume", &g_config.audio.volume_limit, 0, 1, "%.3f", 0);
-            ImGui::SliderInt("DSP Processing", &dsptmp, 0, 1, "Value %0f", 0);
-            ImGui::PopStyleColor();
-            g_config.audio.use_dsp = (bool)dsptmp;      
-            ImGui::EndMenu();
-        }
-
         if (ImGui::BeginMenu("Debug"))
         {
             ImGui::MenuItem("Monitor", "~", &monitor_window.is_open);
@@ -228,17 +215,6 @@ void ShowMainMenu()
                 ImGui::MenuItem("RenderDoc: Capture", NULL, &g_capture_renderdoc_frame);
             }
 #endif
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("XMU"))
-        {
-            if (ImGui::MenuItem("Mount XMU1", NULL)) {
-                xemu_mount_xmu(1);
-            }
-            if (ImGui::MenuItem("Mount XMU2", NULL)) {
-                xemu_mount_xmu(2);
-            }
             ImGui::EndMenu();
         }
 

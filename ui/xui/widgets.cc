@@ -222,7 +222,7 @@ bool Toggle(const char *str_id, bool *v, const char *description)
     return status;
 }
 
-void Slider(const char *str_id, float *v, const char *description, const char *id)
+void Slider(const char *str_id, float *v, const char *description)
 {
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32_BLACK_TRANS);
 
@@ -253,7 +253,7 @@ void Slider(const char *str_id, float *v, const char *description, const char *i
     ImGui::SetCursorPos(ImVec2(wpos.x + size.x - slider_size.x - style.FramePadding.x,
                                wpos.y));
 
-    ImGui::InvisibleButton(id, slider_size, 0);
+    ImGui::InvisibleButton("###slider", slider_size, 0);
 
 
     if (ImGui::IsItemHovered()) {
@@ -293,7 +293,7 @@ void Slider(const char *str_id, float *v, const char *description, const char *i
                slider_size);
 
     ImVec2 slider_max = ImVec2(slider_pos.x + slider_size.x, slider_pos.y + slider_size.y);
-    ImGui::RenderNavHighlight(ImRect(slider_pos, slider_max), window->GetID(id));
+    ImGui::RenderNavHighlight(ImRect(slider_pos, slider_max), window->GetID("###slider"));
 
     ImGui::PopStyleColor();
 }
