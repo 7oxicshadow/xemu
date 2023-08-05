@@ -25,100 +25,6 @@ input:
     port2: string
     port3: string
     port4: string
-  switches:
-    input_disable_rumble: 
-      type: bool
-      default: 0
-    ana_dig_switch: 
-      type: bool
-      default: 0
-    ana_btn_tpf: 
-      type: number
-      default: 1
-    controller_1_lsdz: 
-      type: number
-      default: 0
-    controller_1_rsdz: 
-      type: number
-      default: 0
-    controller_2_lsdz: 
-      type: number
-      default: 0
-    controller_2_rsdz: 
-      type: number
-      default: 0
-    controller_3_lsdz: 
-      type: number
-      default: 0
-    controller_3_rsdz: 
-      type: number
-      default: 0
-    controller_4_lsdz: 
-      type: number
-      default: 0
-    controller_4_rsdz: 
-      type: number
-      default: 0
-    joy_start_offset_ctrl_1: 
-      type: number
-      default: 0
-    joy_start_offset_ctrl_2: 
-      type: number
-      default: 0
-    joy_start_offset_ctrl_3: 
-      type: number
-      default: 0
-    joy_start_offset_ctrl_4: 
-      type: number
-      default: 0
-    controller_1_lstick_inv_x:
-      type: bool
-      default: 0
-    controller_1_lstick_inv_y:
-      type: bool
-      default: 0
-    controller_1_rstick_inv_x:
-      type: bool
-      default: 0
-    controller_1_rstick_inv_y:
-      type: bool
-      default: 0
-    controller_2_lstick_inv_x:
-      type: bool
-      default: 0
-    controller_2_lstick_inv_y:
-      type: bool
-      default: 0
-    controller_2_rstick_inv_x:
-      type: bool
-      default: 0
-    controller_2_rstick_inv_y:
-      type: bool
-      default: 0
-    controller_3_lstick_inv_x:
-      type: bool
-      default: 0
-    controller_3_lstick_inv_y:
-      type: bool
-      default: 0
-    controller_3_rstick_inv_x:
-      type: bool
-      default: 0
-    controller_3_rstick_inv_y:
-      type: bool
-      default: 0
-    controller_4_lstick_inv_x:
-      type: bool
-      default: 0
-    controller_4_lstick_inv_y:
-      type: bool
-      default: 0
-    controller_4_rstick_inv_x:
-      type: bool
-      default: 0
-    controller_4_rstick_inv_y:
-      type: bool
-      default: 0
   gamecontrollerdb_path: string
   auto_bind:
     type: bool
@@ -238,7 +144,7 @@ display:
       default: true
     fit:
       type: enum
-      values: [center, scale, scale_custom, stretch]
+      values: [center, scale, stretch]
       default: scale
     aspect_ratio:
       type: enum
@@ -247,34 +153,9 @@ display:
     scale:
       type: integer
       default: 1
-    ui_show_fps_bool:
-      type: integer
-      default: 0
-    custom_ratio:
-      type : string
-      default: 1.3333333333
     auto_scale:
       type: bool
       default: true
-  debug:
-    video_transparency:
-      type: bool
-      default: false
-    video_x_pos:
-      type: number
-      default: 100
-    video_y_pos:
-      type: number
-      default: 100
-    video_x_winsize:
-      type: number
-      default: 600.0
-    video_y_winsize:
-      type: number
-      default: 150.0
-    video_advancedtree_state:
-      type: bool
-      default: false
 
 audio:
   use_dsp: bool
@@ -323,8 +204,6 @@ sys:
     eeprom_path: string
     hdd_path: string
     dvd_path: string
-    xmu1_path: string
-    xmu2_path: string
 
 perf:
   hard_fpu:
