@@ -1114,6 +1114,10 @@ void MainMenuSystemView::Draw()
         ImGui::TextColored(ImVec4(1,0,0,1), "Application restart required to apply settings");
     }
 
+    if ((int)g_config.sys.avpack == CONFIG_SYS_AVPACK_NONE) {
+        ImGui::TextColored(ImVec4(1,0,0,1), "Setting AV Pack to NONE disables video output.");
+    }
+
     SectionTitle("System Configuration");
 
     if (ChevronCombo(
@@ -1317,34 +1321,21 @@ MainMenuScene::MainMenuScene()
     m_next_view_index = m_current_view_index;
 }
 
-void MainMenuScene::ShowGeneral()
+void MainMenuScene::ShowSettings()
 {
-    SetNextViewIndexWithFocus(0);
+    SetNextViewIndexWithFocus(g_config.general.last_viewed_menu_index);
 }
-void MainMenuScene::ShowInput()
-{
-    SetNextViewIndexWithFocus(1);
-}
-void MainMenuScene::ShowDisplay()
-{
-    SetNextViewIndexWithFocus(2);
-}
-void MainMenuScene::ShowAudio()
-{
-    SetNextViewIndexWithFocus(3);
-}
-void MainMenuScene::ShowNetwork()
-{
-    SetNextViewIndexWithFocus(4);
-}
-void MainMenuScene::ShowSnapshots() 
+
+void MainMenuScene::ShowSnapshots()
 {
     SetNextViewIndexWithFocus(5);
 }
+
 void MainMenuScene::ShowSystem()
 {
     SetNextViewIndexWithFocus(6);
 }
+
 void MainMenuScene::ShowAbout()
 {
     SetNextViewIndexWithFocus(7);
