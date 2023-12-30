@@ -28,6 +28,7 @@
 #include "hw/usb.h"
 #include "hw/usb/desc.h"
 #include "ui/xemu-input.h"
+#include "ui/xemu-settings.h"
 
 //#define DEBUG_XID
 #ifdef DEBUG_XID
@@ -238,7 +239,10 @@ static void update_input(USBXIDState *s)
 
     for (int i = 0; i < 6; i++) {
         int pressed = state->buttons & button_map_analog[i][1];
-        s->in_state.bAnalogButtons[button_map_analog[i][0]] = pressed ? 0xff : 0;
+        if (g_config.input.switches.ana_dig_switch == FALSE)
+            s->in_state.bAnalogButtons[button_map_analog[i][0]] = pressed ? 0xff : 0;
+        else
+            s->in_state.bAnalogButtons[button_map_analog[i][0]] = pressed ? state->button_ana[i] : 0;
     }
 
     s->in_state.wButtons = 0;

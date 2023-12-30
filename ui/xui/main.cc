@@ -216,6 +216,11 @@ void xemu_hud_render(void)
     ImGui::NewFrame();
     ProcessKeyboardShortcuts();
 
+    if(g_config.display.ui.ui_show_fps_bool) {
+        // Draw the FPS before the menu
+        FPSManager_window.Draw();
+    }
+
 #if defined(DEBUG_NV2A_GL) && defined(CONFIG_RENDERDOC)
     if (g_capture_renderdoc_frame) {
         nv2a_dbg_renderdoc_capture_frames(1);
@@ -224,15 +229,25 @@ void xemu_hud_render(void)
 #endif
 
     if (g_config.display.ui.show_menubar && !first_boot_window.is_open) {
-        // Auto-hide main menu after 5s of inactivity
-        static uint32_t last_check = 0;
+        // Auto-hide main menu after 1s of inactivity
+        #define TIMEOUT (2000)
+        static uint32_t last_check = -TIMEOUT;
         float alpha = 1.0;
-        const uint32_t timeout = 5000;
+        const uint32_t timeout = TIMEOUT;
         const float fade_duration = 1000.0;
-        bool menu_wakeup = g_input_mgr.MouseMoved();
+        bool menu_wakeup = false;
+
+        /* initially only wake on click, and then keep alive is mouse movement detected */
+        if( g_input_mgr.MouseClickedOnly() ||
+          ( ((now-last_check) < (timeout + (uint32_t)fade_duration)) && g_input_mgr.MouseMoved() ) )
+        {
+            menu_wakeup = true;
+        }
+
         if (menu_wakeup) {
             last_check = now;
         }
+        
         if ((now-last_check) > timeout) {
             if (g_config.display.ui.use_animations) {
                 float t = fmin((float)((now-last_check)-timeout)/fade_duration, 1);

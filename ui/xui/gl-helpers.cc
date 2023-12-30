@@ -742,6 +742,8 @@ float GetDisplayAspectRatio(int width, int height)
         return 16.0f/9.0f;
     case CONFIG_DISPLAY_UI_ASPECT_RATIO_4X3:
         return 4.0f/3.0f;
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_CUSTOM:
+        return strtof(g_config.display.ui.custom_ratio, NULL);
     case CONFIG_DISPLAY_UI_ASPECT_RATIO_AUTO:
     default:
         return xemu_get_widescreen() ? 16.0f/9.0f : 4.0f/3.0f;

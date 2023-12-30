@@ -46,6 +46,100 @@ input:
       peripheral_param_0: string
       peripheral_type_1: integer
       peripheral_param_1: string
+  switches:
+    input_disable_rumble: 
+      type: bool
+      default: 0
+    ana_dig_switch: 
+      type: bool
+      default: 0
+    ana_btn_tpf: 
+      type: number
+      default: 1
+    controller_1_lsdz: 
+      type: number
+      default: 0
+    controller_1_rsdz: 
+      type: number
+      default: 0
+    controller_2_lsdz: 
+      type: number
+      default: 0
+    controller_2_rsdz: 
+      type: number
+      default: 0
+    controller_3_lsdz: 
+      type: number
+      default: 0
+    controller_3_rsdz: 
+      type: number
+      default: 0
+    controller_4_lsdz: 
+      type: number
+      default: 0
+    controller_4_rsdz: 
+      type: number
+      default: 0
+    joy_start_offset_ctrl_1: 
+      type: number
+      default: 0
+    joy_start_offset_ctrl_2: 
+      type: number
+      default: 0
+    joy_start_offset_ctrl_3: 
+      type: number
+      default: 0
+    joy_start_offset_ctrl_4: 
+      type: number
+      default: 0
+    controller_1_lstick_inv_x:
+      type: bool
+      default: 0
+    controller_1_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_1_rstick_inv_x:
+      type: bool
+      default: 0
+    controller_1_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_2_lstick_inv_x:
+      type: bool
+      default: 0
+    controller_2_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_2_rstick_inv_x:
+      type: bool
+      default: 0
+    controller_2_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_3_lstick_inv_x:
+      type: bool
+      default: 0
+    controller_3_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_3_rstick_inv_x:
+      type: bool
+      default: 0
+    controller_3_rstick_inv_y:
+      type: bool
+      default: 0
+    controller_4_lstick_inv_x:
+      type: bool
+      default: 0
+    controller_4_lstick_inv_y:
+      type: bool
+      default: 0
+    controller_4_rstick_inv_x:
+      type: bool
+      default: 0
+    controller_4_rstick_inv_y:
+      type: bool
+      default: 0
   gamecontrollerdb_path: string
   auto_bind:
     type: bool
@@ -169,11 +263,17 @@ display:
       default: scale
     aspect_ratio:
       type: enum
-      values: [native, auto, 4x3, 16x9]
+      values: [native, auto, 4x3, 16x9, custom]
       default: auto
     scale:
       type: integer
       default: 1
+    ui_show_fps_bool:
+      type: integer
+      default: 0
+    custom_ratio:
+      type : string
+      default: 1.3333333333
     auto_scale:
       type: bool
       default: true

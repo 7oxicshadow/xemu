@@ -445,6 +445,127 @@ void MainMenuInputView::Draw()
     Toggle("Background controller input capture",
            &g_config.input.background_input_capture,
            "Capture even if window is unfocused (requires restart)");
+
+    if(bound_state)
+    {
+        float * lstick_dz_ptr = 0;
+        float * rstick_dz_ptr = 0;
+        float * stick_offset_ptr = 0;
+        char buf0[32];
+        char buf1[32];
+        char buf2[32];
+        char buf3[32];
+
+        Toggle("Globally disable Rumble",
+               &g_config.input.switches.input_disable_rumble,
+               "Disable rumble for all inputs");
+        Toggle("Analog Button Simulation",
+               &g_config.input.switches.ana_dig_switch,
+               "Simulate analog buttons using button hold timers");
+
+        if(g_config.input.switches.ana_dig_switch)
+        {
+            snprintf(buf0, sizeof(buf0), "Value (%d)", (int)(g_config.input.switches.ana_btn_tpf * 20));
+            Slider("Ticks", &g_config.input.switches.ana_btn_tpf, buf0, "###slider0");
+        }
+
+        switch (bound_state->bound)
+        {
+            case 0:
+                Toggle("Invert Left Stick X Axis",
+                    &g_config.input.switches.controller_1_lstick_inv_x,
+                    "Invert Left Stick X Axis");
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_1_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick X Axis",
+                    &g_config.input.switches.controller_1_rstick_inv_x,
+                    "Invert Right Stick X Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_1_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
+                lstick_dz_ptr = &g_config.input.switches.controller_1_lsdz;
+                rstick_dz_ptr = &g_config.input.switches.controller_1_rsdz;
+                stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_1;
+            break;
+
+            case 2:
+                Toggle("Invert Left Stick X Axis",
+                    &g_config.input.switches.controller_2_lstick_inv_x,
+                    "Invert Left Stick X Axis");
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_2_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick X Axis",
+                    &g_config.input.switches.controller_2_rstick_inv_x,
+                    "Invert Right Stick X Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_2_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
+                lstick_dz_ptr = &g_config.input.switches.controller_2_lsdz;
+                rstick_dz_ptr = &g_config.input.switches.controller_2_rsdz;
+                stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_2;
+            break;
+
+            case 3:
+                Toggle("Invert Left Stick X Axis",
+                    &g_config.input.switches.controller_3_lstick_inv_x,
+                    "Invert Left Stick X Axis");
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_3_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick X Axis",
+                    &g_config.input.switches.controller_3_rstick_inv_x,
+                    "Invert Right Stick X Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_3_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
+                lstick_dz_ptr = &g_config.input.switches.controller_3_lsdz;
+                rstick_dz_ptr = &g_config.input.switches.controller_3_rsdz;
+                stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_3;
+            break;
+
+            case 4:
+                Toggle("Invert Left Stick X Axis",
+                    &g_config.input.switches.controller_4_lstick_inv_x,
+                    "Invert Left Stick X Axis");
+                Toggle("Invert Left Stick Y Axis",
+                    &g_config.input.switches.controller_4_lstick_inv_y,
+                    "Invert Left Stick Y Axis");
+                Toggle("Invert Right Stick X Axis",
+                    &g_config.input.switches.controller_4_rstick_inv_x,
+                    "Invert Right Stick X Axis");
+                Toggle("Invert Right Stick Y Axis",
+                    &g_config.input.switches.controller_4_rstick_inv_y,
+                    "Invert Right Stick Y Axis");
+                lstick_dz_ptr = &g_config.input.switches.controller_4_lsdz;
+                rstick_dz_ptr = &g_config.input.switches.controller_4_rsdz;
+                stick_offset_ptr = &g_config.input.switches.joy_start_offset_ctrl_4;
+            break;
+
+            default:
+            break;
+        }
+
+        if( NULL != lstick_dz_ptr )
+        {
+
+            snprintf(buf1, sizeof(buf1), "Value (%d%%)", (int)(*lstick_dz_ptr * 100));
+            Slider("LStick Deadzone (%)", lstick_dz_ptr, buf1, "###slider1");
+        }
+
+        if( NULL != rstick_dz_ptr )
+        {
+            snprintf(buf2, sizeof(buf2), "Value (%d%%)", (int)(*rstick_dz_ptr * 100));            
+            Slider("RStick Deadzone (%)", rstick_dz_ptr, buf2, "###slider2");
+        }
+
+        if( NULL != stick_offset_ptr )
+        {               
+            snprintf(buf3, sizeof(buf3), "Value (%d)", (int)(*stick_offset_ptr * 32767));           
+            Slider("Stick Start Offset (0 - 32767)", stick_offset_ptr, buf3, "###slider3");
+        }
+    }
 }
 
 void MainMenuDisplayView::Draw()
@@ -530,6 +651,7 @@ void MainMenuDisplayView::Draw()
                  "Auto (Default)\0"
                  "4:3\0"
                  "16:9\0",
+                 "custom\0"
                  "Select the displayed aspect ratio");
 }
 
@@ -539,7 +661,7 @@ void MainMenuAudioView::Draw()
     char buf[32];
     snprintf(buf, sizeof(buf), "Limit output volume (%d%%)",
              (int)(g_config.audio.volume_limit * 100));
-    Slider("Output volume limit", &g_config.audio.volume_limit, buf);
+    Slider("Output volume limit", &g_config.audio.volume_limit, buf, "###slider4");
 
     SectionTitle("Quality");
     Toggle("Real-time DSP processing", &g_config.audio.use_dsp,

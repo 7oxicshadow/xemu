@@ -34,6 +34,11 @@
 
 #include "sysemu/blockdev.h"
 
+#include "monitor/monitor-internal.h"
+
+/* prototypes */
+int calculate_range_output(int input, int start, int stop);
+
 // #define DEBUG_INPUT
 
 #ifdef DEBUG_INPUT
@@ -413,6 +418,7 @@ void xemu_input_update_sdl_kbd_controller_state(ControllerState *state)
 
 void xemu_input_update_sdl_controller_state(ControllerState *state)
 {
+    int temp = 0;
     state->buttons = 0;
     memset(state->axis, 0, sizeof(state->axis));
 
@@ -434,8 +440,48 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
         SDL_CONTROLLER_BUTTON_GUIDE
     };
 
+    static uint8_t local_buttonana_a[6] = {0U, 0U, 0U, 0U, 0U, 0U};
+    uint8_t y = 0U;
+    //#define BUTTON_INC_STEP    (5U)
+
     for (int i = 0; i < 15; i++) {
-        state->buttons |= SDL_GameControllerGetButton(state->sdl_gamecontroller, sdl_button_map[i]) << i;
+        uint8_t buttonstate = SDL_GameControllerGetButton(state->sdl_gamecontroller, sdl_button_map[i]);
+
+        state->buttons |= buttonstate << i;
+
+        if( (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_A) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_B) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_X) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_Y) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ||
+            (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) )
+        {
+
+            //printf("%d %d\n", buttonstate, local_buttonana_a[y]);
+
+            /* Hack to fix backward mapping */
+            if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
+                y = 5;
+
+            if (sdl_button_map[i] == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
+                y = 4;
+
+            /* convert from float to int */
+            temp = (int)(g_config.input.switches.ana_btn_tpf * 20);
+
+            if((local_buttonana_a[y] < 0xFF) && buttonstate)
+                if((local_buttonana_a[y] + temp) < 255U)
+                    local_buttonana_a[y] += temp;
+                else
+                    local_buttonana_a[y] = 255U;
+            else
+                if(buttonstate == 0U)
+                    local_buttonana_a[y] = 0U;
+
+            state->button_ana[y] = local_buttonana_a[y];
+
+            y++;
+        }
     }
 
     const SDL_GameControllerAxis sdl_axis_map[6] = {
@@ -452,12 +498,173 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
     state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
     state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
 
-    // xemu_input_print_controller_state(state);
+    #define MAX_INPUT_RANGE    (32767)
+
+    int JOYSTICK_LEFT_DEAD_ZONE = 0;
+    int JOYSTICK_RIGHT_DEAD_ZONE = 0;
+    int joy_offset;
+
+    if (state->bound >= 0){
+
+        switch(state->bound)
+        {
+            case 0:
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_1_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_1_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_1 * MAX_INPUT_RANGE);
+            break;
+
+            case 1:
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_2_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_2_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_2 * MAX_INPUT_RANGE);
+            break;
+
+            case 2:
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_3_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_3_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_3 * MAX_INPUT_RANGE);
+            break;
+
+            case 3:
+                JOYSTICK_LEFT_DEAD_ZONE = (int)(g_config.input.switches.controller_4_lsdz * MAX_INPUT_RANGE);
+                JOYSTICK_RIGHT_DEAD_ZONE = (int)(g_config.input.switches.controller_4_rsdz * MAX_INPUT_RANGE);
+                joy_offset = (int)(g_config.input.switches.joy_start_offset_ctrl_4 * MAX_INPUT_RANGE);
+            break;
+
+            default:
+            break;
+        }
+
+        //printf("%d\n", JOYSTICK_LEFT_DEAD_ZONE);
+
+        if ((state->axis[CONTROLLER_AXIS_LSTICK_X] > -JOYSTICK_LEFT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_LSTICK_X] < JOYSTICK_LEFT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_LSTICK_X] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_LSTICK_Y] > -JOYSTICK_LEFT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_LSTICK_Y] < JOYSTICK_LEFT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_LSTICK_Y] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_RSTICK_X] > -JOYSTICK_RIGHT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_RSTICK_X] < JOYSTICK_RIGHT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_RSTICK_X] = 0;
+        }
+        if ((state->axis[CONTROLLER_AXIS_RSTICK_Y] > -JOYSTICK_RIGHT_DEAD_ZONE) && (state->axis[CONTROLLER_AXIS_RSTICK_Y] < JOYSTICK_RIGHT_DEAD_ZONE)){
+            state->axis[CONTROLLER_AXIS_RSTICK_Y] = 0;
+        }
+    }
+
+    //#define OFFSET    (10000)
+
+    int lstickx = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_X], joy_offset, MAX_INPUT_RANGE );
+    int lsticky = calculate_range_output(state->axis[CONTROLLER_AXIS_LSTICK_Y], joy_offset, MAX_INPUT_RANGE );
+    int rstickx = calculate_range_output(state->axis[CONTROLLER_AXIS_RSTICK_X], joy_offset, MAX_INPUT_RANGE );
+    int rsticky = calculate_range_output(state->axis[CONTROLLER_AXIS_RSTICK_Y], joy_offset, MAX_INPUT_RANGE );
+
+    state->axis[CONTROLLER_AXIS_LSTICK_X] = lstickx;
+    state->axis[CONTROLLER_AXIS_LSTICK_Y] = lsticky;
+    state->axis[CONTROLLER_AXIS_RSTICK_X] = rstickx;
+    state->axis[CONTROLLER_AXIS_RSTICK_Y] = rsticky;
+
+    /* process invert switches. This is done at the end so we dont have to mess with the deadzone checks
+       above */
+    if (state->bound >= 0){
+
+        switch(state->bound)
+        {
+            case 0:
+                if(true == g_config.input.switches.controller_1_lstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_LSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_1_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_1_rstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_RSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_1_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 1:
+                if(true == g_config.input.switches.controller_2_lstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_LSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_2_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_2_rstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_RSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_2_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 2:
+                if(true == g_config.input.switches.controller_3_lstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_LSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_3_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_3_rstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_RSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_3_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            case 3:
+                if(true == g_config.input.switches.controller_4_lstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_LSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_4_lstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_LSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_LSTICK_Y];
+                }
+                if(true == g_config.input.switches.controller_4_rstick_inv_x){
+                    state->axis[CONTROLLER_AXIS_RSTICK_X] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_X];
+                }
+                if(true == g_config.input.switches.controller_4_rstick_inv_y){
+                    state->axis[CONTROLLER_AXIS_RSTICK_Y] = -1 - state->axis[CONTROLLER_AXIS_RSTICK_Y];
+                }
+            break;
+
+            default:
+            break;
+        }
+    }
+    //printf("%d    %d    %d    %d\n",lstickx, lsticky, rstickx, rsticky);
+}
+
+int calculate_range_output(int input, int start, int stop)
+{
+    int output = 0;
+    int range = 0;
+
+    if(input != 0)
+    {
+        range = stop - start;
+
+        if(input > 0)
+            output = (int)(((float)input / (float)32767) * range) + start;
+        else
+            output = (int)(((float)input / (float)32767) * range) - start;
+
+        if (output > 32767) output = 32767;
+        else if (output < -32767) output = -32767;
+        else
+        {
+            /* do nothing */
+        }
+    }
+
+    return output;
 }
 
 void xemu_input_update_rumble(ControllerState *state)
 {
-    if (!state->rumble_enabled) {
+    if ( (!state->rumble_enabled) || (g_config.input.switches.input_disable_rumble == true)) {
         return;
     }
 

@@ -366,5 +366,52 @@ void DebugVideoWindow::Draw()
     ImGui::PopStyleColor(5);
 }
 
+FPSManager::FPSManager()
+{
+    active = true;
+}
+
+void FPSManager::Draw()
+{
+    const float DISTANCE = 10.0f;
+    static int corner = 0;
+    ImGuiIO& io = ImGui::GetIO();
+    if (corner != -1)
+    {
+        ImVec2 window_pos = ImVec2((corner & 1) ? io.DisplaySize.x - DISTANCE : DISTANCE, (corner & 2) ? io.DisplaySize.y - DISTANCE : DISTANCE);
+        window_pos.y = g_main_menu_height + DISTANCE;
+        ImVec2 window_pos_pivot = ImVec2((corner & 1) ? 1.0f : 0.0f, (corner & 2) ? 1.0f : 0.0f);
+        ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
+    }
+
+    float fade = 1.0;
+
+    ImVec4 color = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+    color.w *= fade;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0,0,0,fade*0.9f));
+    ImGui::PushStyleColor(ImGuiCol_Border, color);
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::SetNextWindowBgAlpha(0.90f * fade);
+    if (ImGui::Begin("FPSOverlay", NULL,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoInputs
+        ))
+    {
+        ImGui::Text("FPS %d", g_nv2a_stats.increment_fps);
+    }
+    ImGui::PopStyleColor();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+    ImGui::End();
+}
+
 DebugApuWindow apu_window;
 DebugVideoWindow video_window;
+FPSManager FPSManager_window;
