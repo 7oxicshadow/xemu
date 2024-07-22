@@ -28,6 +28,7 @@
 #include "compat.hh"
 #include "update.hh"
 #include "../xemu-os-utils.h"
+#include "ui/xemu-input.h"
 
 extern float g_main_menu_height; // FIXME
 
@@ -189,12 +190,24 @@ void ShowMainMenu()
             HelpMarker("Controls how the rendered content should be scaled "
                        "into the window");
             ImGui::Combo("Aspect Ratio", &g_config.display.ui.aspect_ratio,
-                         "Native\0Auto\0""4:3\0""16:9\0");
+                         "Native\0Auto\0""4:3\0""16:9\0Custom\0");
             if (ImGui::MenuItem("Fullscreen", SHORTCUT_MENU_TEXT(Alt + F),
                                 xemu_is_fullscreen(), true)) {
                 xemu_toggle_fullscreen();
             }
 
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Audio"))
+        {
+            int dsptmp = (int)g_config.audio.use_dsp;
+
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(ImColor(0, 220, 0, 80)));
+            ImGui::SliderFloat("Volume", &g_config.audio.volume_limit, 0, 1, "%.3f", 0);
+            ImGui::SliderInt("DSP Processing", &dsptmp, 0, 1, "Value %0f", 0);
+            ImGui::PopStyleColor();
+            g_config.audio.use_dsp = (bool)dsptmp;      
             ImGui::EndMenu();
         }
 
