@@ -658,7 +658,7 @@ void MainMenuDisplayView::Draw()
                  "Native\0"
                  "Auto (Default)\0"
                  "4:3\0"
-                 "16:9\0",
+                 "16:9\0"
                  "custom\0",
                  "Select the displayed aspect ratio");
 }
