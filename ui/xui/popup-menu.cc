@@ -280,7 +280,8 @@ public:
             "Native",
             "Auto (Default)",
             "4:3",
-            "16:9"
+            "16:9",
+            "custom"
         };
 
         for (int i = 0; i < CONFIG_DISPLAY_UI_ASPECT_RATIO__COUNT; i++) {
