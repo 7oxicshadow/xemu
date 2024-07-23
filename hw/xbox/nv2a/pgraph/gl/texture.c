@@ -791,7 +791,7 @@ static bool texture_cache_entry_compare(Lru *lru, LruNode *node, void *key)
     return memcmp(&tnode->key, key, sizeof(TextureKey));
 }
 
-void pgraph_gl_init_texture_cache(NV2AState *d)
+void pgraph_gl_init_textures(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
@@ -809,11 +809,16 @@ void pgraph_gl_init_texture_cache(NV2AState *d)
     r->texture_cache.post_node_evict = texture_cache_entry_post_evict;
 }
 
-void pgraph_gl_deinit_texture_cache(PGRAPHState *pg)
+void pgraph_gl_finalize_textures(PGRAPHState *pg)
 {
     PGRAPHGLState *r = pg->gl_renderer_state;
 
-    // Clear out texture cache
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        r->texture_binding[i] = NULL;
+    }
+
     lru_flush(&r->texture_cache);
     free(r->texture_cache_entries);
+
+    r->texture_cache_entries = NULL;
 }

@@ -461,7 +461,7 @@ void *pfifo_thread(void *arg)
     while (true) {
         d->pfifo.fifo_kick = false;
 
-        d->pgraph.renderer->ops.process_pending(d);
+        pgraph_process_pending(d);
 
         if (!d->pfifo.halt) {
             pfifo_run_pusher(d);

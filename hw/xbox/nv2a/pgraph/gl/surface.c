@@ -39,8 +39,6 @@ void pgraph_gl_set_surface_scale_factor(NV2AState *d, unsigned int scale)
 
     g_config.display.quality.surface_scale = scale < 1 ? 1 : scale;
 
-    qemu_mutex_unlock_iothread();
-
     qemu_mutex_lock(&d->pfifo.lock);
     qatomic_set(&d->pfifo.halt, true);
     qemu_mutex_unlock(&d->pfifo.lock);
@@ -67,8 +65,6 @@ void pgraph_gl_set_surface_scale_factor(NV2AState *d, unsigned int scale)
     qatomic_set(&d->pfifo.halt, false);
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
-
-    qemu_mutex_lock_iothread();
 }
 
 unsigned int pgraph_gl_get_surface_scale_factor(NV2AState *d)
@@ -160,6 +156,23 @@ static void init_render_to_texture(PGRAPHState *pg)
     glBindBuffer(GL_ARRAY_BUFFER, r->s2t_rndr.vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_STATIC_DRAW);
     glGenFramebuffers(1, &r->s2t_rndr.fbo);
+}
+
+static void finalize_render_to_texture(PGRAPHState *pg)
+{
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    glDeleteProgram(r->s2t_rndr.prog);
+    r->s2t_rndr.prog = 0;
+
+    glDeleteVertexArrays(1, &r->s2t_rndr.vao);
+    r->s2t_rndr.vao = 0;
+
+    glDeleteBuffers(1, &r->s2t_rndr.vbo);
+    r->s2t_rndr.vbo = 0;
+
+    glDeleteFramebuffers(1, &r->s2t_rndr.fbo);
+    r->s2t_rndr.fbo = 0;
 }
 
 static bool surface_to_texture_can_fastpath(SurfaceBinding *surface,
@@ -1365,20 +1378,10 @@ void pgraph_gl_init_surfaces(PGRAPHState *pg)
     init_render_to_texture(pg);
 }
 
-void pgraph_gl_deinit_surfaces(PGRAPHState *pg)
-{
-    PGRAPHGLState *r = pg->gl_renderer_state;
-
-    glDeleteFramebuffers(1, &r->gl_framebuffer);
-    // TODO: clear out surfaces
-}
-
-void pgraph_gl_surface_flush(NV2AState *d)
+static void flush_surfaces(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
-
-    bool update_surface = (r->color_binding || r->zeta_binding);
 
     /* Clear last surface shape to force recreation of buffers at next draw */
     pg->surface_color.draw_dirty = false;
@@ -1389,8 +1392,33 @@ void pgraph_gl_surface_flush(NV2AState *d)
 
     SurfaceBinding *s, *next;
     QTAILQ_FOREACH_SAFE(s, &r->surfaces, entry, next) {
+        // FIXME: We should download all surfaces to ram, but need to
+        //        investigate corruption issue
+        // pgraph_gl_surface_download_if_dirty(d, s);
         pgraph_gl_surface_invalidate(d, s);
     }
+}
+
+void pgraph_gl_finalize_surfaces(PGRAPHState *pg)
+{
+    NV2AState *d = container_of(pg, NV2AState, pgraph);
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    flush_surfaces(d);
+    glDeleteFramebuffers(1, &r->gl_framebuffer);
+    r->gl_framebuffer = 0;
+
+    finalize_render_to_texture(pg);
+}
+
+void pgraph_gl_surface_flush(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHGLState *r = pg->gl_renderer_state;
+
+    bool update_surface = (r->color_binding || r->zeta_binding);
+
+    flush_surfaces(d);
 
     pgraph_gl_reload_surface_scale_factor(pg);
 

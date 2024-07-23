@@ -36,8 +36,11 @@ void pgraph_vk_set_surface_scale_factor(NV2AState *d, unsigned int scale)
 {
     g_config.display.quality.surface_scale = scale < 1 ? 1 : scale;
 
+<<<<<<< HEAD
     qemu_mutex_unlock_iothread();
 
+=======
+>>>>>>> xemu/feat/vulkan
     qemu_mutex_lock(&d->pfifo.lock);
     qatomic_set(&d->pfifo.halt, true);
     qemu_mutex_unlock(&d->pfifo.lock);
@@ -65,8 +68,11 @@ void pgraph_vk_set_surface_scale_factor(NV2AState *d, unsigned int scale)
     qatomic_set(&d->pfifo.halt, false);
     pfifo_kick(d);
     qemu_mutex_unlock(&d->pfifo.lock);
+<<<<<<< HEAD
 
     qemu_mutex_lock_iothread();
+=======
+>>>>>>> xemu/feat/vulkan
 }
 
 unsigned int pgraph_vk_get_surface_scale_factor(NV2AState *d)
@@ -1477,6 +1483,12 @@ void pgraph_vk_surface_flush(NV2AState *d)
 
     SurfaceBinding *s, *next;
     QTAILQ_FOREACH_SAFE(s, &r->surfaces, entry, next) {
+<<<<<<< HEAD
+=======
+        // FIXME: We should download all surfaces to ram, but need to
+        //        investigate corruption issue
+        pgraph_vk_surface_download_if_dirty(d, s);
+>>>>>>> xemu/feat/vulkan
         invalidate_surface(d, s);
     }
     prune_invalid_surfaces(r, 0);

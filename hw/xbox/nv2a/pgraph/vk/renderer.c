@@ -24,22 +24,32 @@
 
 #if HAVE_EXTERNAL_MEMORY
 static GloContext *g_gl_context;
-
-static void gl_context_init(void)
-{
-    g_gl_context = glo_context_create();
-}
 #endif
 
-static void pgraph_vk_init_thread(NV2AState *d)
+static void early_context_init(void)
+{
+#if HAVE_EXTERNAL_MEMORY
+    g_gl_context = glo_context_create();
+#endif
+}
+
+static void pgraph_vk_init(NV2AState *d, Error **errp)
 {
     PGRAPHState *pg = &d->pgraph;
+
+    pg->vk_renderer_state = (PGRAPHVkState *)g_malloc0(sizeof(PGRAPHVkState));
 
 #if HAVE_EXTERNAL_MEMORY
     glo_set_current(g_gl_context);
 #endif
 
-    pgraph_vk_init_instance(pg);
+    pgraph_vk_debug_init();
+
+    pgraph_vk_init_instance(pg, errp);
+    if (*errp) {
+        return;
+    }
+
     pgraph_vk_init_command_buffers(pg);
     pgraph_vk_init_buffers(d);
     pgraph_vk_init_surfaces(pg);
@@ -49,6 +59,9 @@ static void pgraph_vk_init_thread(NV2AState *d)
     pgraph_vk_init_reports(pg);
     pgraph_vk_init_compute(pg);
     pgraph_vk_init_display(pg);
+
+    pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
+                                   memory_region_size(d->vram));
 }
 
 static void pgraph_vk_finalize(NV2AState *d)
@@ -65,6 +78,9 @@ static void pgraph_vk_finalize(NV2AState *d)
     pgraph_vk_finalize_buffers(d);
     pgraph_vk_finalize_command_buffers(pg);
     pgraph_vk_finalize_instance(pg);
+
+    g_free(pg->vk_renderer_state);
+    pg->vk_renderer_state = NULL;
 }
 
 static void pgraph_vk_flush(NV2AState *d)
@@ -184,24 +200,12 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
 #endif
 }
 
-static void pgraph_vk_init(NV2AState *d)
-{
-    PGRAPHState *pg = &d->pgraph;
-
-    pg->vk_renderer_state = (PGRAPHVkState *)g_malloc0(sizeof(PGRAPHVkState));
-
-    pgraph_vk_debug_init();
-}
-
 static PGRAPHRenderer pgraph_vk_renderer = {
     .type = CONFIG_DISPLAY_RENDERER_VULKAN,
     .name = "Vulkan",
     .ops = {
         .init = pgraph_vk_init,
-#if HAVE_EXTERNAL_MEMORY
-        .early_context_init = gl_context_init,
-#endif
-        .init_thread = pgraph_vk_init_thread,
+        .early_context_init = early_context_init,
         .finalize = pgraph_vk_finalize,
         .clear_report_value = pgraph_vk_clear_report_value,
         .clear_surface = pgraph_vk_clear_surface,

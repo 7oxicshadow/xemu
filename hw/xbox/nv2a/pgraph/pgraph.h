@@ -100,8 +100,7 @@ typedef struct PGRAPHRenderer {
     const char *name;
     struct {
         void (*early_context_init)(void);
-        void (*init)(NV2AState *d);
-        void (*init_thread)(NV2AState *d);
+        void (*init)(NV2AState *d, Error **errp);
         void (*finalize)(NV2AState *d);
         void (*clear_report_value)(NV2AState *d);
         void (*clear_surface)(NV2AState *d, uint32_t parameter);
@@ -127,6 +126,7 @@ typedef struct PGRAPHRenderer {
 
 typedef struct PGRAPHState {
     QemuMutex lock;
+    QemuMutex renderer_lock;
 
     uint32_t pending_interrupts;
     uint32_t enabled_interrupts;
@@ -235,6 +235,9 @@ typedef struct PGRAPHState {
     bool sync_pending;
     QemuEvent sync_complete;
 
+    bool framebuffer_in_use;
+    QemuCond framebuffer_released;
+
     unsigned int surface_scale_factor;
     uint8_t *scale_buf;
 
@@ -250,6 +253,13 @@ void pgraph_init(NV2AState *d);
 void pgraph_init_thread(NV2AState *d);
 void pgraph_destroy(PGRAPHState *pg);
 void pgraph_context_switch(NV2AState *d, unsigned int channel_id);
+void pgraph_process_pending(NV2AState *d);
+void pgraph_process_pending_reports(NV2AState *d);
+void pgraph_pre_savevm_trigger(NV2AState *d);
+void pgraph_pre_savevm_wait(NV2AState *d);
+void pgraph_pre_shutdown_trigger(NV2AState *d);
+void pgraph_pre_shutdown_wait(NV2AState *d);
+
 int pgraph_method(NV2AState *d, unsigned int subchannel, unsigned int method,
                   uint32_t parameter, uint32_t *parameters,
                   size_t num_words_available, size_t max_lookahead_words,

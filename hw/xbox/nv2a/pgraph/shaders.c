@@ -90,7 +90,6 @@ ShaderState pgraph_get_shader_state(PGRAPHState *pg)
             pgraph_reg_r(pg, NV_PGRAPH_CSV0_C), NV_PGRAPH_CSV0_C_DIFFUSE);
         state.specular_src = (enum MaterialColorSource)GET_MASK(
             pgraph_reg_r(pg, NV_PGRAPH_CSV0_C), NV_PGRAPH_CSV0_C_SPECULAR);
-        state.material_alpha = pg->material_alpha;
     }
 
     /* vertex program stuff */

@@ -156,6 +156,8 @@ typedef struct ShaderModuleInfo {
 
 typedef struct ShaderBinding {
     LruNode node;
+    bool initialized;
+
     ShaderState state;
     ShaderModuleInfo *geometry;
     ShaderModuleInfo *vertex;
@@ -378,7 +380,7 @@ void pgraph_vk_check_memory_budget(PGRAPHState *pg);
 void pgraph_vk_debug_init(void);
 
 // instance.c
-void pgraph_vk_init_instance(PGRAPHState *pg);
+void pgraph_vk_init_instance(PGRAPHState *pg, Error **errp);
 void pgraph_vk_finalize_instance(PGRAPHState *pg);
 QueueFamilyIndices pgraph_vk_find_queue_families(VkPhysicalDevice device);
 uint32_t pgraph_vk_get_memory_type(PGRAPHState *pg, uint32_t type_bits,
