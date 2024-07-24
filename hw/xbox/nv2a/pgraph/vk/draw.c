@@ -982,19 +982,28 @@ static void create_pipeline(PGRAPHState *pg)
     // FIXME: No direct analog. Just do it with MSAA.
     // }
 
-    VkPushConstantRange push_constant_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        // FIXME: Minimize push constants
-        .size = NV2A_VERTEXSHADER_ATTRIBUTES * 4 * sizeof(float),
-    };
     VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &r->descriptor_set_layout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push_constant_range,
     };
+
+    VkPushConstantRange push_constant_range;
+    if (r->shader_binding->state.use_push_constants_for_uniform_attrs) {
+        int num_uniform_attributes =
+            __builtin_popcount(r->shader_binding->state.uniform_attrs);
+        if (num_uniform_attributes) {
+            push_constant_range = (VkPushConstantRange){
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                .offset = 0,
+                // FIXME: Minimize push constants
+                .size = num_uniform_attributes * 4 * sizeof(float),
+            };
+            pipeline_layout_info.pushConstantRangeCount = 1;
+            pipeline_layout_info.pPushConstantRanges = &push_constant_range;
+        }
+    }
+
     VkPipelineLayout layout;
     VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
                                     &layout));
@@ -1031,23 +1040,28 @@ static void create_pipeline(PGRAPHState *pg)
     NV2A_VK_DGROUP_END();
 }
 
-static void push_vertex_attrib_values(PGRAPHState *pg)
+static void push_vertex_attr_values(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    // FIXME: Do partial updates
-
-    float attrib_values[NV2A_VERTEXSHADER_ATTRIBUTES * 4];
-    for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
-        attrib_values[i * 4 + 0] = pg->vertex_attributes[i].inline_value[0];
-        attrib_values[i * 4 + 1] = pg->vertex_attributes[i].inline_value[1];
-        attrib_values[i * 4 + 2] = pg->vertex_attributes[i].inline_value[2];
-        attrib_values[i * 4 + 3] = pg->vertex_attributes[i].inline_value[3];
+    if (!r->shader_binding->state.use_push_constants_for_uniform_attrs) {
+        return;
     }
 
-    vkCmdPushConstants(r->command_buffer, r->pipeline_binding->layout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(attrib_values),
-                       &attrib_values);
+    // FIXME: Partial updates
+
+    float values[NV2A_VERTEXSHADER_ATTRIBUTES][4];
+    int num_uniform_attrs = 0;
+
+    pgraph_get_inline_values(pg, r->shader_binding->state.uniform_attrs, values,
+                             &num_uniform_attrs);
+
+    if (num_uniform_attrs > 0) {
+        vkCmdPushConstants(r->command_buffer, r->pipeline_binding->layout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           num_uniform_attrs * 4 * sizeof(float),
+                           &values);
+    }
 }
 
 static void bind_descriptor_sets(PGRAPHState *pg)
@@ -1107,7 +1121,64 @@ static void sync_staging_buffer(PGRAPHState *pg, VkCommandBuffer cmd,
     VkBufferCopy copy_region = { .size = b_src->buffer_offset };
     vkCmdCopyBuffer(cmd, b_src->buffer, b_dst->buffer, 1, &copy_region);
 
+    VkAccessFlags dst_access_mask;
+    VkPipelineStageFlags dst_stage_mask;
+
+    switch (index_dst) {
+    case BUFFER_INDEX:
+        dst_access_mask = VK_ACCESS_INDEX_READ_BIT;
+        dst_stage_mask = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        break;
+    case BUFFER_VERTEX_INLINE:
+        dst_access_mask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        dst_stage_mask = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        break;
+    case BUFFER_UNIFORM:
+        dst_access_mask = VK_ACCESS_UNIFORM_READ_BIT;
+        dst_stage_mask = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+        break;
+    default:
+        assert(0);
+        break;
+    }
+
+    VkBufferMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = dst_access_mask,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = b_dst->buffer,
+        .size = b_src->buffer_offset
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, dst_stage_mask, 0,
+                         0, NULL, 1, &barrier, 0, NULL);
+
     b_src->buffer_offset = 0;
+}
+
+static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    VK_CHECK(vmaFlushAllocation(
+        r->allocator, r->storage_buffers[BUFFER_VERTEX_RAM].allocation, 0,
+        VK_WHOLE_SIZE));
+
+    VkBufferMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_VERTEX_RAM].buffer,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE,
+    };
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, NULL, 1,
+                         &barrier, 0, NULL);
 }
 
 static void begin_render_pass(PGRAPHState *pg)
@@ -1183,10 +1254,11 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                 BUFFER_VERTEX_INLINE);
         sync_staging_buffer(pg, cmd, BUFFER_UNIFORM_STAGING, BUFFER_UNIFORM);
         bitmap_clear(r->uploaded_bitmap, 0, r->bitmap_size);
+        flush_memory_buffer(pg, cmd);
         VK_CHECK(vkEndCommandBuffer(r->aux_command_buffer));
         r->in_aux_command_buffer = false;
 
-        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         VkSubmitInfo submit_infos[] = {
             {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1405,7 +1477,7 @@ static void begin_draw(PGRAPHState *pg)
 
     if (!pg->clearing) {
         bind_descriptor_sets(pg);
-        push_vertex_attrib_values(pg);
+        push_vertex_attr_values(pg);
     }
 
     r->in_draw = true;
