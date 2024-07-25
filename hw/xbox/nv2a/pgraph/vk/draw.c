@@ -188,12 +188,35 @@ static void init_clear_shaders(PGRAPHState *pg)
         r, VK_SHADER_STAGE_FRAGMENT_BIT, solid_frag_glsl);
 }
 
+static void finalize_clear_shaders(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    pgraph_vk_destroy_shader_module(r, r->quad_vert_module);
+    pgraph_vk_destroy_shader_module(r, r->solid_frag_module);
+}
+
+static void init_render_passes(PGRAPHVkState *r)
+{
+    r->render_passes = g_array_new(false, false, sizeof(RenderPass));
+}
+
+static void finalize_render_passes(PGRAPHVkState *r)
+{
+    for (int i = 0; i < r->render_passes->len; i++) {
+        RenderPass *p = &g_array_index(r->render_passes, RenderPass, i);
+        vkDestroyRenderPass(r->device, p->render_pass, NULL);
+    }
+    g_array_free(r->render_passes, true);
+}
+
 void pgraph_vk_init_pipelines(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     init_pipeline_cache(pg);
     init_clear_shaders(pg);
+    init_render_passes(r);
 
     VkSemaphoreCreateInfo semaphore_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
@@ -212,7 +235,9 @@ void pgraph_vk_finalize_pipelines(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    finalize_clear_shaders(pg);
     finalize_pipeline_cache(pg);
+    finalize_render_passes(r);
 
     vkDestroyFence(r->device, r->command_buffer_fence, NULL);
     vkDestroySemaphore(r->device, r->command_buffer_semaphore, NULL);
@@ -229,11 +254,9 @@ static void init_render_pass_state(PGRAPHState *pg, RenderPassState *state)
                                            VK_FORMAT_UNDEFINED;
 }
 
-static VkRenderPass create_render_pass(PGRAPHState *pg, RenderPassState *state)
+static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
 {
     NV2A_VK_DPRINTF("Creating render pass");
-
-    PGRAPHVkState *r = pg->vk_renderer_state;
 
     VkAttachmentDescription attachments[2];
     int num_attachments = 0;
@@ -319,36 +342,24 @@ static VkRenderPass create_render_pass(PGRAPHState *pg, RenderPassState *state)
     return render_pass;
 }
 
-static VkRenderPass add_new_render_pass(PGRAPHState *pg, RenderPassState *state)
+static VkRenderPass add_new_render_pass(PGRAPHVkState *r, RenderPassState *state)
 {
-    PGRAPHVkState *r = pg->vk_renderer_state;
-
-    if (r->render_passes_index == r->render_passes_capacity) {
-        int n_blocks = r->render_passes_capacity;
-        r->render_passes_capacity = n_blocks ? (n_blocks * 2) : 256;
-        r->render_passes =
-            g_realloc_n(r->render_passes, r->render_passes_capacity,
-                        sizeof(*r->render_passes));
-    }
-
-    RenderPass *rp = &r->render_passes[r->render_passes_index++];
-    memcpy(&rp->state, state, sizeof(*state));
-    rp->render_pass = create_render_pass(pg, state);
-
-    return rp->render_pass;
+    RenderPass new_pass;
+    memcpy(&new_pass.state, state, sizeof(*state));
+    new_pass.render_pass = create_render_pass(r, state);
+    g_array_append_vals(r->render_passes, &new_pass, 1);
+    return new_pass.render_pass;
 }
 
-static VkRenderPass get_render_pass(PGRAPHState *pg, RenderPassState *state)
+static VkRenderPass get_render_pass(PGRAPHVkState *r, RenderPassState *state)
 {
-    PGRAPHVkState *r = pg->vk_renderer_state;
-
-    for (int i = 0; i < r->render_passes_index; i++) {
-        if (!memcmp(&r->render_passes[i].state, state, sizeof(*state))) {
-            return r->render_passes[i].render_pass;
+    for (int i = 0; i < r->render_passes->len; i++) {
+        RenderPass *p = &g_array_index(r->render_passes, RenderPass, i);
+        if (!memcmp(&p->state, state, sizeof(*state))) {
+            return p->render_pass;
         }
     }
-
-    return add_new_render_pass(pg, state);
+    return add_new_render_pass(r, state);
 }
 
 static void create_frame_buffer(PGRAPHState *pg)
@@ -439,20 +450,24 @@ static void create_clear_pipeline(PGRAPHState *pg)
     bool partial_color_clear =
         clear_any_color_channels && !clear_all_color_channels;
 
-    VkPipelineShaderStageCreateInfo shader_stages[] = {
+    int num_active_shader_stages = 0;
+    VkPipelineShaderStageCreateInfo shader_stages[2];
+    shader_stages[num_active_shader_stages++] =
         (VkPipelineShaderStageCreateInfo){
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_VERTEX_BIT,
             .module = r->quad_vert_module->module,
             .pName = "main",
-        },
-        (VkPipelineShaderStageCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = r->solid_frag_module->module,
-            .pName = "main",
-        },
-     };
+        };
+    if (clear_any_color_channels) {
+        shader_stages[num_active_shader_stages++] =
+            (VkPipelineShaderStageCreateInfo){
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .module = r->solid_frag_module->module,
+                .pName = "main",
+            };
+     }
 
     VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -556,7 +571,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
 
     VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = ARRAY_SIZE(shader_stages),
+        .stageCount = num_active_shader_stages,
         .pStages = shader_stages,
         .pVertexInputState = &vertex_input,
         .pInputAssemblyState = &input_assembly,
@@ -567,7 +582,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = layout,
-        .renderPass = get_render_pass(pg, &key.render_pass_state),
+        .renderPass = get_render_pass(r, &key.render_pass_state),
         .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
@@ -1021,7 +1036,7 @@ static void create_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = layout,
-        .renderPass = get_render_pass(pg, &key.render_pass_state),
+        .renderPass = get_render_pass(r, &key.render_pass_state),
         .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
@@ -1781,6 +1796,10 @@ static void bind_vertex_buffer(PGRAPHState *pg, int buffer_idx,
 
     assert(buffer_idx == BUFFER_VERTEX_RAM ||
            buffer_idx == BUFFER_VERTEX_INLINE);
+
+    if (r->num_active_vertex_binding_descriptions == 0) {
+        return;
+    }
 
     VkBuffer buffers[NV2A_VERTEXSHADER_ATTRIBUTES];
     VkDeviceSize offsets[NV2A_VERTEXSHADER_ATTRIBUTES];
