@@ -1009,10 +1009,6 @@ static void create_pipeline(PGRAPHState *pg)
     // FIXME: No direct analog. Just do it with MSAA.
     // }
 
-<<<<<<< HEAD
-=======
-
->>>>>>> xemu/feat/vulkan
     VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
