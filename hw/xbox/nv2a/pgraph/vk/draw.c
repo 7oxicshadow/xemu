@@ -794,10 +794,6 @@ static void create_pipeline(PGRAPHState *pg)
         .scissorCount = 1,
     };
 
-<<<<<<< HEAD
-
-=======
->>>>>>> xemu/feat/vulkan
     void *rasterizer_next_struct = NULL;
 
     VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_state;
