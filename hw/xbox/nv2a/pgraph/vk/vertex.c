@@ -47,11 +47,8 @@ void pgraph_vk_update_vertex_ram_buffer(PGRAPHState *pg, hwaddr offset,
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-<<<<<<< HEAD
-=======
     pgraph_vk_download_surfaces_in_range_if_dirty(pg, offset, size);
 
->>>>>>> xemu/feat/vulkan
     size_t offset_bit = offset / 4096;
     size_t nbits = size / 4096;
     if (find_next_bit(r->uploaded_bitmap, nbits, offset_bit) < nbits) {
@@ -266,10 +263,7 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
             };
 
         r->vertex_attribute_offsets[i] = attrib_data_addr;
-<<<<<<< HEAD
-=======
         // FIXME: Data alignment may not meet requirements
->>>>>>> xemu/feat/vulkan
 
         NV2A_VK_DGROUP_END();
     }
