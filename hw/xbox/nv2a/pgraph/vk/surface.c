@@ -122,6 +122,23 @@ static void memcpy_image(void *dst, void const *src, int dst_stride,
     }
 }
 
+void pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg, hwaddr start, hwaddr size)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    SurfaceBinding *surface;
+
+    hwaddr end = start + size - 1;
+
+    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+        hwaddr surf_end = surface->vram_addr + surface->size - 1;
+        bool overlapping = !(surface->vram_addr >= end || start >= surf_end);
+        if (overlapping) {
+            pgraph_vk_surface_download_if_dirty(
+                container_of(pg, NV2AState, pgraph), surface);
+        }
+    }
+}
+
 static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                                        uint8_t *pixels)
 {
@@ -130,9 +147,18 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
 
     nv2a_profile_inc_counter(NV2A_PROF_SURF_DOWNLOAD);
 
+    bool use_compute_to_convert_depth_stencil_format =
+        surface->host_fmt.vk_format == VK_FORMAT_D24_UNORM_S8_UINT ||
+        surface->host_fmt.vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+
+    bool compute_needs_finish = (use_compute_to_convert_depth_stencil_format &&
+                                 pgraph_vk_compute_needs_finish(r));
+
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+    } else if (compute_needs_finish) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
     }
 
     bool downscale = (pg->surface_scale_factor != 1);
@@ -174,10 +200,6 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                                            VK_IMAGE_ASPECT_DEPTH_BIT,
         .imageSubresource.layerCount = 1,
     };
-
-    bool use_compute_to_convert_depth_stencil_format =
-        surface->host_fmt.vk_format == VK_FORMAT_D24_UNORM_S8_UINT ||
-        surface->host_fmt.vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 
     VkImage surface_image_loc;
     if (downscale && !use_compute_to_convert_depth_stencil_format) {
@@ -230,11 +252,14 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
     }
 
     if (surface->host_fmt.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) {
+        size_t depth_size = scaled_width * scaled_height * 4;
         copy_regions[num_copy_regions++] = (VkBufferImageCopy){
-            .bufferOffset = scaled_width * scaled_height * 4,
+            .bufferOffset = ROUND_UP(
+                depth_size,
+                r->device_props.limits.minStorageBufferOffsetAlignment),
             .imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
             .imageSubresource.layerCount = 1,
-            .imageExtent = (VkExtent3D){scaled_width, scaled_height, 1},
+            .imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 },
         };
     }
 
@@ -723,7 +748,6 @@ static bool check_invalid_surface_is_compatibile(SurfaceBinding *surface,
     return surface->host_fmt.vk_format == target->host_fmt.vk_format &&
            surface->width == target->width &&
            surface->height == target->height &&
-           surface->pitch == target->pitch &&
            surface->host_fmt.usage == target->host_fmt.usage;
 }
 
@@ -939,7 +963,9 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
         // Already scaled during compute. Adjust copy regions.
         regions[0].imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 };
         regions[1].imageExtent = regions[0].imageExtent;
-        regions[1].bufferOffset = unpacked_depth_image_size;
+        regions[1].bufferOffset =
+            ROUND_UP(unpacked_depth_image_size,
+                     r->device_props.limits.minStorageBufferOffsetAlignment);
 
         copy_buffer = unpack_buffer;
     }
@@ -1152,7 +1178,11 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                                            d->vram, target.vram_addr,
                                            target.size, DIRTY_MEMORY_NV2A);
 
-    if (upload && (pg_surface->buffer_dirty || mem_dirty)) {
+    SurfaceBinding *current_binding = color ? r->color_binding
+                                            : r->zeta_binding;
+
+    if (!current_binding ||
+        (upload && (pg_surface->buffer_dirty || mem_dirty))) {
         // FIXME: We don't need to be so aggressive flushing the command list
         // pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE);
         pgraph_vk_ensure_not_in_render_pass(pg);

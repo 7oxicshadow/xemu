@@ -208,6 +208,7 @@ static void finalize_render_passes(PGRAPHVkState *r)
         vkDestroyRenderPass(r->device, p->render_pass, NULL);
     }
     g_array_free(r->render_passes, true);
+    r->render_passes = NULL;
 }
 
 void pgraph_vk_init_pipelines(PGRAPHState *pg)
@@ -307,17 +308,27 @@ static VkRenderPass create_render_pass(PGRAPHVkState *r, RenderPassState *state)
     if (color) {
         dependency.srcStageMask |=
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         dependency.dstStageMask |=
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     }
 
     if (zeta) {
         dependency.srcStageMask |=
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dependency.srcAccessMask |=
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         dependency.dstStageMask |=
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask |=
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     }
 
     VkSubpassDescription subpass = {
@@ -735,6 +746,13 @@ static void create_pipeline(PGRAPHState *pg)
     int num_active_shader_stages = 0;
     VkPipelineShaderStageCreateInfo shader_stages[3];
 
+    shader_stages[num_active_shader_stages++] =
+        (VkPipelineShaderStageCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = r->shader_binding->vertex->module,
+            .pName = "main",
+        };
     if (r->shader_binding->geometry) {
         shader_stages[num_active_shader_stages++] =
             (VkPipelineShaderStageCreateInfo){
@@ -744,20 +762,15 @@ static void create_pipeline(PGRAPHState *pg)
                 .pName = "main",
             };
     }
-    shader_stages[num_active_shader_stages++] =
-        (VkPipelineShaderStageCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = r->shader_binding->vertex->module,
-            .pName = "main",
-        };
-    shader_stages[num_active_shader_stages++] =
-        (VkPipelineShaderStageCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = r->shader_binding->fragment->module,
-            .pName = "main",
-        };
+    if (r->color_binding) {
+        shader_stages[num_active_shader_stages++] =
+            (VkPipelineShaderStageCreateInfo){
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .module = r->shader_binding->fragment->module,
+                .pName = "main",
+            };
+    }
 
     VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -781,7 +794,10 @@ static void create_pipeline(PGRAPHState *pg)
         .scissorCount = 1,
     };
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> xemu/feat/vulkan
     void *rasterizer_next_struct = NULL;
 
     VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_state;
@@ -997,6 +1013,10 @@ static void create_pipeline(PGRAPHState *pg)
     // FIXME: No direct analog. Just do it with MSAA.
     // }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> xemu/feat/vulkan
     VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
@@ -1243,6 +1263,7 @@ const enum NV2A_PROF_COUNTERS_ENUM finish_reason_to_counter_enum[] = {
     [VK_FINISH_REASON_PRESENTING] = NV2A_PROF_FINISH_PRESENTING,
     [VK_FINISH_REASON_FLIP_STALL] = NV2A_PROF_FINISH_FLIP_STALL,
     [VK_FINISH_REASON_FLUSH] = NV2A_PROF_FINISH_FLUSH,
+    [VK_FINISH_REASON_STALLED] = NV2A_PROF_FINISH_STALLED,
 };
 
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
@@ -1321,6 +1342,8 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     pgraph_vk_process_pending_reports_internal(d);
+
+    pgraph_vk_compute_finish_complete(r);
 }
 
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
@@ -1657,16 +1680,19 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     bool write_zeta =
         (parameter & (NV097_CLEAR_SURFACE_Z | NV097_CLEAR_SURFACE_STENCIL));
 
+    pg->clearing = true;
+
     // FIXME: If doing a full surface clear, mark the surface for full clear
     // and we can just do the clear as part of the surface load.
     pgraph_vk_surface_update(d, true, write_color, write_zeta);
 
-    if (!(r->color_binding || r->zeta_binding)) {
+    SurfaceBinding *binding = r->color_binding ?: r->zeta_binding;
+    if (!binding) {
         /* Nothing bound to clear */
+        pg->clearing = false;
         return;
     }
 
-    pg->clearing = true;
     r->clear_parameter = parameter;
 
     unsigned int xmin =
@@ -1681,6 +1707,11 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     NV2A_VK_DGROUP_BEGIN("CLEAR min=(%d,%d) max=(%d,%d)%s%s", xmin, ymin, xmax,
                          ymax, write_color ? " color" : "",
                          write_zeta ? " zeta" : "");
+
+    xmin = MIN(xmin, binding->width - 1);
+    ymin = MIN(xmin, binding->height - 1);
+    xmax = MIN(xmax, binding->width - 1);
+    ymax = MIN(ymax, binding->height - 1);
 
     begin_pre_draw(pg);
     begin_draw(pg);

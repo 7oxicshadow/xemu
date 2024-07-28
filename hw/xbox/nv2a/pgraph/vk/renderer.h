@@ -257,15 +257,26 @@ typedef struct PGRAPHVkDisplayState {
     GLuint gl_texture_id;
 } PGRAPHVkDisplayState;
 
+typedef struct ComputePipelineKey {
+    VkFormat host_fmt;
+    bool pack;
+    int workgroup_size;
+} ComputePipelineKey;
+
+typedef struct ComputePipeline {
+    LruNode node;
+    ComputePipelineKey key;
+    VkPipeline pipeline;
+} ComputePipeline;
+
 typedef struct PGRAPHVkComputeState {
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorSet descriptor_sets[1];
+    VkDescriptorSet descriptor_sets[1024];
+    int descriptor_set_index;
     VkPipelineLayout pipeline_layout;
-    VkPipeline pipeline_pack_d24s8;
-    VkPipeline pipeline_unpack_d24s8;
-    VkPipeline pipeline_pack_f32s8;
-    VkPipeline pipeline_unpack_f32s8;
+    Lru pipeline_cache;
+    ComputePipeline *pipeline_cache_entries;
 } PGRAPHVkComputeState;
 
 typedef struct PGRAPHVkState {
@@ -446,6 +457,7 @@ void pgraph_vk_surface_download_if_dirty(NV2AState *d, SurfaceBinding *surface);
 SurfaceBinding *pgraph_vk_surface_get_within(NV2AState *d, hwaddr addr);
 void pgraph_vk_wait_for_surface_download(SurfaceBinding *e);
 void pgraph_vk_download_dirty_surfaces(NV2AState *d);
+void pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg, hwaddr start, hwaddr size);
 void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
                                    bool force);
 void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
@@ -458,6 +470,8 @@ void pgraph_vk_reload_surface_scale_factor(PGRAPHState *pg);
 
 // surface-compute.c
 void pgraph_vk_init_compute(PGRAPHState *pg);
+bool pgraph_vk_compute_needs_finish(PGRAPHVkState *r);
+void pgraph_vk_compute_finish_complete(PGRAPHVkState *r);
 void pgraph_vk_finalize_compute(PGRAPHState *pg);
 void pgraph_vk_pack_depth_stencil(PGRAPHState *pg, SurfaceBinding *surface,
                                   VkCommandBuffer cmd, VkBuffer src,
@@ -503,6 +517,7 @@ typedef enum FinishReason {
     VK_FINISH_REASON_PRESENTING,
     VK_FINISH_REASON_FLIP_STALL,
     VK_FINISH_REASON_FLUSH,
+    VK_FINISH_REASON_STALLED,
 } FinishReason;
 
 // draw.c
