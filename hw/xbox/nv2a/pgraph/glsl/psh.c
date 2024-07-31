@@ -562,31 +562,13 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     ps->varE = ps->varF = NULL;
 }
 
-static enum PS_TEXTUREMODES correct_texture_mode_for_dimensionality(enum PS_TEXTUREMODES mode, const PshState *state, int i)
+static const char *get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *state, int i)
 {
+    const char *sampler2D = "sampler2D";
+    const char *sampler3D = "sampler3D";
+    const char *samplerCube = "samplerCube";
     int dim = state->dim_tex[i];
 
-    switch (mode) {
-    case PS_TEXTUREMODES_PROJECT2D:
-        return dim == 2 ? PS_TEXTUREMODES_PROJECT2D :
-               dim == 3 ? PS_TEXTUREMODES_PROJECT3D :
-                          mode;
-    case PS_TEXTUREMODES_PROJECT3D:
-        return dim == 2 ? PS_TEXTUREMODES_PROJECT2D : mode;
-    case PS_TEXTUREMODES_DOT_STR_3D:
-        return dim == 2 ? PS_TEXTUREMODES_DOT_ST : mode;
-    default:
-        return mode;
-    }
-}
-
-static const char sampler2D[] = "sampler2D";
-static const char sampler3D[] = "sampler3D";
-static const char samplerCube[] = "samplerCube";
-static const char sampler2DRect[] = "sampler2DRect";
-
-static const char* get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *state, int i)
-{
     // FIXME: Cleanup
     switch (mode) {
     default:
@@ -598,7 +580,7 @@ static const char* get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *s
         if (state->tex_x8y24[i] && state->vulkan) {
             return "usampler2D";
         }
-        return (state->rect_tex[i] && !state->vulkan) ? sampler2DRect : sampler2D;
+        return sampler2D;
 
     case PS_TEXTUREMODES_BUMPENVMAP:
     case PS_TEXTUREMODES_BUMPENVMAP_LUM:
@@ -608,7 +590,7 @@ static const char* get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *s
             assert(!"Shadow map support not implemented for this mode");
         }
         assert(state->dim_tex[i] == 2);
-        return (state->rect_tex[i] && !state->vulkan) ? sampler2DRect : sampler2D;
+        return sampler2D;
 
     case PS_TEXTUREMODES_PROJECT3D:
     case PS_TEXTUREMODES_DOT_STR_3D:
@@ -616,10 +598,9 @@ static const char* get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *s
             return "usampler2D";
         }
         if (state->shadow_map[i]) {
-            return (state->rect_tex[i] && !state->vulkan) ? sampler2DRect : sampler2D;
+            return sampler2D;
         }
-        assert(state->dim_tex[i] == 3);
-        return sampler3D;
+        return dim == 2 ? sampler2D : sampler3D;
 
     case PS_TEXTUREMODES_CUBEMAP:
     case PS_TEXTUREMODES_DOT_RFLCT_DIFF:
@@ -664,27 +645,23 @@ static void psh_append_shadowmap(const struct PixelShader *ps, int i, bool compa
         return;
     }
 
-    mstring_append_fmt(vars, "pT%d.xy *= texScale%d;\n", i, i);
+    g_autofree gchar *normalize_tex_coords = g_strdup_printf("norm%d", i);
+    const char *tex_remap = ps->state.rect_tex[i] ? normalize_tex_coords : "";
+
     const char *comparison = shadow_comparison_map[ps->state.shadow_depth_func];
-    if (ps->state.rect_tex[i] && ps->state.vulkan) {
-        if (ps->state.tex_x8y24[i]) {
-            mstring_append_fmt(
-                vars,
-                "uvec4 t%d_depth_raw = textureLod(texSamp%d, pT%d.xy/pT%d.w, 0);\n", i, i, i, i);
-            mstring_append_fmt(
-                vars,
-                "vec4 t%d_depth = vec4(float(t%d_depth_raw.x >> 8) / 0xFFFFFF, 1.0, 0.0, 0.0);\n",
-                i, i);
-        } else {
-            mstring_append_fmt(
-                vars,
-                "vec4 t%d_depth = textureLod(texSamp%d, pT%d.xy/pT%d.w, 0);\n", i,
-                i, i, i);            
-        }
-    } else {
-        mstring_append_fmt(
-            vars, "vec4 t%d_depth = textureProj(texSamp%d, pT%d.xyw);\n", i, i,
-            i);
+
+    bool extract_msb_24b = ps->state.tex_x8y24[i] && ps->state.vulkan;
+
+    mstring_append_fmt(
+        vars, "%svec4 t%d_depth%s = textureProj(texSamp%d, %s(pT%d.xyw));\n",
+        extract_msb_24b ? "u" : "", i, extract_msb_24b ? "_raw" : "", i,
+        tex_remap, i);
+
+    if (extract_msb_24b) {
+        mstring_append_fmt(vars,
+                           "vec4 t%d_depth = vec4(float(t%d_depth_raw.x >> 8) "
+                           "/ 0xFFFFFF, 1.0, 0.0, 0.0);\n",
+                           i, i);
     }
 
     // Depth.y != 0 indicates 24 bit; depth.z != 0 indicates float.
@@ -733,26 +710,18 @@ static void apply_border_adjustment(const struct PixelShader *ps, MString *vars,
 
 static void apply_convolution_filter(const struct PixelShader *ps, MString *vars, int tex)
 {
-    // FIXME: Convolution for 2D textures
     // FIXME: Quincunx
-    assert(ps->state.rect_tex[tex]);
 
-    if (ps->state.vulkan) {
-        mstring_append_fmt(vars,
-            "vec4 t%d = vec4(0.0);\n"
-            "for (int i = 0; i < 9; i++) {\n"
-            "    vec2 texCoord = pT%d.xy/pT%d.w + convolution3x3[i];\n"
-            "    t%d += textureLod(texSamp%d, texCoord, 0) * gaussian3x3[i];\n"
-            "}\n", tex, tex, tex, tex, tex);
-    } else {
-        mstring_append_fmt(vars,
-            "vec4 t%d = vec4(0.0);\n"
-            "for (int i = 0; i < 9; i++) {\n"
-            "    vec3 texCoord = pT%d.xyw + vec3(convolution3x3[i], 0);\n"
-            "    t%d += textureProj(texSamp%d, texCoord) * gaussian3x3[i];\n"
-            "}\n", tex, tex, tex, tex, tex);
+    g_autofree gchar *normalize_tex_coords = g_strdup_printf("norm%d", tex);
+    const char *tex_remap = ps->state.rect_tex[tex] ? normalize_tex_coords : "";
 
-    }
+    mstring_append_fmt(vars,
+        "vec4 t%d = vec4(0.0);\n"
+        "for (int i = 0; i < 9; i++) {\n"
+        "    vec3 texCoordDelta = vec3(convolution3x3[i], 0);\n"
+        "    texCoordDelta.xy /= textureSize(texSamp%d, 0);\n"
+        "    t%d += textureProj(texSamp%d, %s(pT%d.xyw) + texCoordDelta) * gaussian3x3[i];\n"
+        "}\n", tex, tex, tex, tex, tex_remap, tex);
 }
 
 static MString* psh_convert(struct PixelShader *ps)
@@ -928,6 +897,9 @@ static MString* psh_convert(struct PixelShader *ps)
 
         const char *sampler_type = get_sampler_type(ps->tex_modes[i], &ps->state, i);
 
+        g_autofree gchar *normalize_tex_coords = g_strdup_printf("norm%d", i);
+        const char *tex_remap = ps->state.rect_tex[i] ? normalize_tex_coords : "";
+
         assert(ps->dot_map[i] < 8);
         const char *dotmap_func = dotmap_funcs[ps->dot_map[i]];
         if (ps->dot_map[i] > 3) {
@@ -944,25 +916,12 @@ static MString* psh_convert(struct PixelShader *ps)
                 psh_append_shadowmap(ps, i, false, vars);
             } else {
                 apply_border_adjustment(ps, vars, i, "pT%d");
-                mstring_append_fmt(vars, "pT%d.xy = texScale%d * pT%d.xy;\n", i, i, i);
-                if (ps->state.rect_tex[i]) {
-                    if ((ps->state.conv_tex[i] ==
-                         CONVOLUTION_FILTER_GAUSSIAN) ||
-                        (ps->state.conv_tex[i] ==
-                         CONVOLUTION_FILTER_QUINCUNX)) {
-                        apply_convolution_filter(ps, vars, i);
-                    } else {
-                        if (ps->state.vulkan) {
-                            mstring_append_fmt(vars, "vec4 t%d = textureLod(texSamp%d, pT%d.xy/pT%d.w, 0);\n",
-                                               i, i, i, i);
-                        } else {
-                            mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
-                                               i, i, i);
-                        }
-                    }
+                if (((ps->state.conv_tex[i] == CONVOLUTION_FILTER_GAUSSIAN) ||
+                     (ps->state.conv_tex[i] == CONVOLUTION_FILTER_QUINCUNX))) {
+                    apply_convolution_filter(ps, vars, i);
                 } else {
-                    mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
-                                       i, i, i);
+                    mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, %s(pT%d.xyw));\n",
+                                       i, i, tex_remap, i);
                 }
             }
             break;
@@ -971,10 +930,9 @@ static MString* psh_convert(struct PixelShader *ps)
             if (ps->state.shadow_map[i]) {
                 psh_append_shadowmap(ps, i, true, vars);
             } else {
-                assert(!ps->state.rect_tex[i]);
                 apply_border_adjustment(ps, vars, i, "pT%d");
-                mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
-                                   i, i, i);
+                mstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, %s(pT%d.xyzw));\n",
+                                   i, i, tex_remap, i);
             }
             break;
         case PS_TEXTUREMODES_CUBEMAP:
@@ -1011,8 +969,8 @@ static MString* psh_convert(struct PixelShader *ps)
 
             mstring_append_fmt(vars, "dsdt%d = bumpMat%d * dsdt%d;\n",
                 i, i, i, i);
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, texScale%d * (pT%d.xy + dsdt%d));\n",
-                i, i, i, i, i);
+            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdt%d));\n",
+                i, i, tex_remap, i, i);
             break;
         case PS_TEXTUREMODES_BUMPENVMAP_LUM:
             assert(i >= 1);
@@ -1029,8 +987,8 @@ static MString* psh_convert(struct PixelShader *ps)
 
             mstring_append_fmt(vars, "dsdtl%d.st = bumpMat%d * dsdtl%d.st;\n",
                 i, i, i, i);
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, texScale%d * (pT%d.xy + dsdtl%d.st));\n",
-                i, i, i, i, i);
+            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdtl%d.st));\n",
+                i, i, tex_remap, i, i);
             mstring_append_fmt(vars, "t%d = t%d * (bumpScale%d * dsdtl%d.p + bumpOffset%d);\n",
                 i, i, i, i, i);
             break;
@@ -1049,8 +1007,8 @@ static MString* psh_convert(struct PixelShader *ps)
                 i, i, dotmap_func, ps->input_tex[i], i, i-1, i);
 
             apply_border_adjustment(ps, vars, i, "dotST%d");
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, texScale%d * dotST%d);\n",
-                i, i, i, i);
+            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(dotST%d));\n",
+                i, i, tex_remap, i);
             break;
         case PS_TEXTUREMODES_DOT_ZW:
             assert(i >= 2);
@@ -1118,16 +1076,16 @@ static MString* psh_convert(struct PixelShader *ps)
             assert(!ps->state.rect_tex[i]);
             mstring_append_fmt(vars, "vec2 t%dAR = t%d.ar;\n", i, ps->input_tex[i]);
             apply_border_adjustment(ps, vars, i, "t%dAR");
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%dAR);\n",
-                i, i, i);
+            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(t%dAR));\n",
+                i, i, tex_remap, i);
             break;
         case PS_TEXTUREMODES_DPNDNT_GB:
             assert(i >= 1);
             assert(!ps->state.rect_tex[i]);
             mstring_append_fmt(vars, "vec2 t%dGB = t%d.gb;\n", i, ps->input_tex[i]);
             apply_border_adjustment(ps, vars, i, "t%dGB");
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%dGB);\n",
-                i, i, i);
+            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(t%dGB));\n",
+                i, i, tex_remap, i);
             break;
         case PS_TEXTUREMODES_DOTPRODUCT:
             assert(i == 1 || i == 2);
@@ -1158,6 +1116,24 @@ static MString* psh_convert(struct PixelShader *ps)
             if (ps->state.alphakill[i]) {
                 mstring_append_fmt(vars, "if (t%d.a == 0.0) { discard; };\n",
                                    i);
+            }
+
+            if (ps->state.rect_tex[i]) {
+                mstring_append_fmt(preflight,
+                "vec2 norm%d(vec2 coord) {\n"
+                "    return coord / (textureSize(texSamp%d, 0) / texScale%d);\n"
+                "}\n",
+                i, i, i);
+                mstring_append_fmt(preflight,
+                "vec3 norm%d(vec3 coord) {\n"
+                "    return vec3(norm%d(coord.xy), coord.z);\n"
+                "}\n",
+                i, i);
+                mstring_append_fmt(preflight,
+                "vec4 norm%d(vec4 coord) {\n"
+                "    return vec4(norm%d(coord.xy), 0, coord.w);\n"
+                "}\n",
+                i, i);
             }
         }
     }
@@ -1272,7 +1248,6 @@ MString *pgraph_gen_psh_glsl(const PshState state)
     ps.flags = state.combiner_control >> 8;
     for (i = 0; i < 4; i++) {
         ps.tex_modes[i] = (state.shader_stage_program >> (i * 5)) & 0x1F;
-        ps.tex_modes[i] = correct_texture_mode_for_dimensionality(ps.tex_modes[i], &state, i);
     }
 
     ps.dot_map[0] = 0;

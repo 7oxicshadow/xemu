@@ -31,9 +31,9 @@
 
 const char *pack_d24_unorm_s8_uint_to_z24s8_glsl =
     "layout(push_constant) uniform PushConstants { uint width_in, width_out; };\n"
-    "layout(binding = 0) buffer DepthIn { uint depth_in[]; };\n"
-    "layout(binding = 1) buffer StencilIn { uint stencil_in[]; };\n"
-    "layout(binding = 2) buffer DepthStencilOut { uint depth_stencil_out[]; };\n"
+    "layout(set = 0, binding = 0) buffer DepthIn { uint depth_in[]; };\n"
+    "layout(set = 0, binding = 1) buffer StencilIn { uint stencil_in[]; };\n"
+    "layout(set = 0, binding = 2) buffer DepthStencilOut { uint depth_stencil_out[]; };\n"
     "uint get_input_idx(uint idx_out) {\n"
     "    uint scale = width_in / width_out;\n"
     "    uint y = (idx_out / width_out) * scale;\n"
@@ -50,9 +50,9 @@ const char *pack_d24_unorm_s8_uint_to_z24s8_glsl =
 
 const char *unpack_z24s8_to_d24_unorm_s8_uint_glsl =
     "layout(push_constant) uniform PushConstants { uint width_in, width_out; };\n"
-    "layout(binding = 0) buffer DepthOut { uint depth_out[]; };\n"
-    "layout(binding = 1) buffer StencilOut { uint stencil_out[]; };\n"
-    "layout(binding = 2) buffer DepthStencilIn { uint depth_stencil_in[]; };\n"
+    "layout(set = 0, binding = 0) buffer DepthOut { uint depth_out[]; };\n"
+    "layout(set = 0, binding = 1) buffer StencilOut { uint stencil_out[]; };\n"
+    "layout(set = 0, binding = 2) buffer DepthStencilIn { uint depth_stencil_in[]; };\n"
     "uint get_input_idx(uint idx_out) {\n"
     "    uint scale = width_out / width_in;\n"
     "    uint y = (idx_out / width_out) / scale;\n"
@@ -75,9 +75,9 @@ const char *unpack_z24s8_to_d24_unorm_s8_uint_glsl =
 
 const char *pack_d32_sfloat_s8_uint_to_z24s8_glsl =
     "layout(push_constant) uniform PushConstants { uint width_in, width_out; };\n"
-    "layout(binding = 0) buffer DepthIn { float depth_in[]; };\n"
-    "layout(binding = 1) buffer StencilIn { uint stencil_in[]; };\n"
-    "layout(binding = 2) buffer DepthStencilOut { uint depth_stencil_out[]; };\n"
+    "layout(set = 0, binding = 0) buffer DepthIn { float depth_in[]; };\n"
+    "layout(set = 0, binding = 1) buffer StencilIn { uint stencil_in[]; };\n"
+    "layout(set = 0, binding = 2) buffer DepthStencilOut { uint depth_stencil_out[]; };\n"
     "uint get_input_idx(uint idx_out) {\n"
     "    uint scale = width_in / width_out;\n"
     "    uint y = (idx_out / width_out) * scale;\n"
@@ -94,9 +94,9 @@ const char *pack_d32_sfloat_s8_uint_to_z24s8_glsl =
 
 const char *unpack_z24s8_to_d32_sfloat_s8_uint_glsl =
     "layout(push_constant) uniform PushConstants { uint width_in, width_out; };\n"
-    "layout(binding = 0) buffer DepthOut { float depth_out[]; };\n"
-    "layout(binding = 1) buffer StencilOut { uint stencil_out[]; };\n"
-    "layout(binding = 2) buffer DepthStencilIn { uint depth_stencil_in[]; };\n"
+    "layout(set = 0, binding = 0) buffer DepthOut { float depth_out[]; };\n"
+    "layout(set = 0, binding = 1) buffer StencilOut { uint stencil_out[]; };\n"
+    "layout(set = 0, binding = 2) buffer DepthStencilIn { uint depth_stencil_in[]; };\n"
     "uint get_input_idx(uint idx_out) {\n"
     "    uint scale = width_out / width_in;\n"
     "    uint y = (idx_out / width_out) / scale;\n"
@@ -139,7 +139,7 @@ static gchar *get_compute_shader_glsl(VkFormat host_fmt, bool pack,
 
     gchar *glsl = g_strdup_printf(
         "#version 450\n"
-        "layout(local_size_x = %d) in;\n"
+        "layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;\n"
         "%s", workgroup_size, template);
     assert(glsl);
 
@@ -545,15 +545,9 @@ static void pipeline_cache_release_node_resources(PGRAPHVkState *r, ComputePipel
     snode->pipeline = VK_NULL_HANDLE;
 }
 
-static bool pipeline_cache_entry_pre_evict(Lru *lru, LruNode *node)
-{
-    // FIXME: Check pipeline not in use
-    return false;
-}
-
 static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
 {
-    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, pipeline_cache);
+    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, compute.pipeline_cache);
     ComputePipeline *snode = container_of(node, ComputePipeline, node);
     pipeline_cache_release_node_resources(r, snode);
 }
@@ -575,7 +569,6 @@ static void pipeline_cache_init(PGRAPHVkState *r)
     }
     r->compute.pipeline_cache.init_node = pipeline_cache_entry_init;
     r->compute.pipeline_cache.compare_nodes = pipeline_cache_entry_compare;
-    r->compute.pipeline_cache.pre_node_evict = pipeline_cache_entry_pre_evict;
     r->compute.pipeline_cache.post_node_evict = pipeline_cache_entry_post_evict;
 }
 
@@ -600,6 +593,8 @@ void pgraph_vk_init_compute(PGRAPHState *pg)
 void pgraph_vk_finalize_compute(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+    assert(!r->in_command_buffer);
 
     pipeline_cache_finalize(r);
     destroy_compute_pipeline_layout(r);

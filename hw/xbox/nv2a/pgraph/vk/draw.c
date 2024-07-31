@@ -470,7 +470,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
             .module = r->quad_vert_module->module,
             .pName = "main",
         };
-    if (clear_any_color_channels) {
+    if (partial_color_clear) {
         shader_stages[num_active_shader_stages++] =
             (VkPipelineShaderStageCreateInfo){
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -762,15 +762,13 @@ static void create_pipeline(PGRAPHState *pg)
                 .pName = "main",
             };
     }
-    if (r->color_binding) {
-        shader_stages[num_active_shader_stages++] =
-            (VkPipelineShaderStageCreateInfo){
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .module = r->shader_binding->fragment->module,
-                .pName = "main",
-            };
-    }
+    shader_stages[num_active_shader_stages++] =
+        (VkPipelineShaderStageCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = r->shader_binding->fragment->module,
+            .pName = "main",
+        };
 
     VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -1311,6 +1309,8 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                r->command_buffer_fence));
         r->submit_count += 1;
 
+        bool check_budget = false;
+
         // Periodically check memory budget
         const int max_num_submits_before_budget_update = 5;
         if (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
@@ -1320,8 +1320,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             // VMA queries budget via vmaSetCurrentFrameIndex
             vmaSetCurrentFrameIndex(r->allocator, r->submit_count);
             r->allocator_last_submit_index = r->submit_count;
-
-            pgraph_vk_check_memory_budget(pg);
+            check_budget = true;
         }
 
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
@@ -1330,6 +1329,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->descriptor_set_index = 0;
         r->in_command_buffer = false;
         destroy_framebuffers(pg);
+
+        if (check_budget) {
+            pgraph_vk_check_memory_budget(pg);
+        }
     }
 
     NV2AState *d = container_of(pg, NV2AState, pgraph);
@@ -1687,29 +1690,29 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 
     r->clear_parameter = parameter;
 
-    unsigned int xmin =
-        GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTX), NV_PGRAPH_CLEARRECTX_XMIN);
-    unsigned int xmax =
-        GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTX), NV_PGRAPH_CLEARRECTX_XMAX);
-    unsigned int ymin =
-        GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY), NV_PGRAPH_CLEARRECTY_YMIN);
-    unsigned int ymax =
-        GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY), NV_PGRAPH_CLEARRECTY_YMAX);
+    uint32_t clearrectx = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTX);
+    uint32_t clearrecty = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY);
+
+    int xmin = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMIN);
+    int xmax = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMAX);
+    int ymin = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMIN);
+    int ymax = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMAX);
 
     NV2A_VK_DGROUP_BEGIN("CLEAR min=(%d,%d) max=(%d,%d)%s%s", xmin, ymin, xmax,
                          ymax, write_color ? " color" : "",
                          write_zeta ? " zeta" : "");
 
-    xmin = MIN(xmin, binding->width - 1);
-    ymin = MIN(xmin, binding->height - 1);
-    xmax = MIN(xmax, binding->width - 1);
-    ymax = MIN(ymax, binding->height - 1);
-
     begin_pre_draw(pg);
     begin_draw(pg);
 
-    unsigned int scissor_width = xmax - xmin + 1,
-                 scissor_height = ymax - ymin + 1;
+    // FIXME: What does hardware do when min <= max?
+    xmin = MIN(xmin, binding->width - 1);
+    ymin = MIN(ymin, binding->height - 1);
+    xmax = MIN(xmax, binding->width - 1);
+    ymax = MIN(ymax, binding->height - 1);
+
+    int scissor_width = MAX(0, xmax - xmin + 1),
+        scissor_height = MAX(0, ymax - ymin + 1);
 
     pgraph_apply_anti_aliasing_factor(pg, &xmin, &ymin);
     pgraph_apply_anti_aliasing_factor(pg, &scissor_width, &scissor_height);
@@ -1758,10 +1761,13 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
         pgraph_get_clear_depth_stencil_value(pg, &depth_value, &stencil_value);
 
         VkImageAspectFlags aspect = 0;
-        if (parameter & NV097_CLEAR_SURFACE_Z)
+        if (parameter & NV097_CLEAR_SURFACE_Z) {
             aspect |= VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (parameter & NV097_CLEAR_SURFACE_STENCIL)
+        }
+        if ((parameter & NV097_CLEAR_SURFACE_STENCIL) &&
+            (r->zeta_binding->host_fmt.aspect & VK_IMAGE_ASPECT_STENCIL_BIT)) {
             aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
 
         attachments[num_attachments++] = (VkClearAttachment){
             .aspectMask = aspect,

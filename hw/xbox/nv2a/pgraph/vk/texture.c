@@ -229,11 +229,7 @@ static TextureLayout *get_texture_layout(PGRAPHState *pg, int texture_idx)
     }
 
     if (s.dimensionality == 2) {
-        hwaddr layer_size = 0;
-        if (s.cubemap) {
-            layer_size = get_cubemap_layer_size(pg, s);
-        }
-
+        hwaddr layer_size = s.cubemap ? get_cubemap_layer_size(pg, s) : 0;
         const int num_layers = s.cubemap ? 6 : 1;
         for (int layer = 0; layer < num_layers; layer++) {
             unsigned int width = adjusted_width, height = adjusted_height;
@@ -549,12 +545,30 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
             region++;
         }
     }
-    assert(buffer_offset <= texture_data_size);
+    assert(buffer_offset <= r->storage_buffers[BUFFER_STAGING_SRC].buffer_size);
+
+    vmaFlushAllocation(r->allocator,
+                       r->storage_buffers[BUFFER_STAGING_SRC].allocation, 0,
+                       VK_WHOLE_SIZE);
+
     vmaUnmapMemory(r->allocator,
                    r->storage_buffers[BUFFER_STAGING_SRC].allocation);
 
     // FIXME: Use nondraw. Need to fill and copy tex buffer at once
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+
+    VkBufferMemoryBarrier host_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_STAGING_SRC].buffer,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                         &host_barrier, 0, NULL);
 
     pgraph_vk_transition_image_layout(pg, cmd, binding->image, vkf.vk_format,
                                       binding->current_layout,
@@ -612,12 +626,6 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
                  scaled_height = surface->height;
     pgraph_apply_scaling_factor(pg, &scaled_width, &scaled_height);
 
-    pgraph_vk_transition_image_layout(
-        pg, cmd, surface->image, surface->host_fmt.vk_format,
-        surface->color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL :
-                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
     size_t copied_image_size =
         scaled_width * scaled_height * surface->host_fmt.host_bytes_per_pixel;
     size_t stencil_buffer_offset = 0;
@@ -661,72 +669,112 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
     StorageBuffer *dst_storage_buffer = &r->storage_buffers[BUFFER_COMPUTE_DST];
     assert(dst_storage_buffer->buffer_size >= copied_image_size);
 
+    pgraph_vk_transition_image_layout(
+        pg, cmd, surface->image, surface->host_fmt.vk_format,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
     vkCmdCopyImageToBuffer(
         cmd, surface->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         dst_storage_buffer->buffer,
         num_regions, regions);
 
-    if (use_compute_to_convert_depth_stencil) {
-        size_t packed_image_size = scaled_width * scaled_height * 4;
-
-        VkBufferMemoryBarrier pre_pack_barrier = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = r->storage_buffers[BUFFER_COMPUTE_DST].buffer,
-            .size = VK_WHOLE_SIZE
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL,
-                             1, &pre_pack_barrier, 0, NULL);
-
-        pgraph_vk_pack_depth_stencil(
-            pg, surface, cmd,
-            r->storage_buffers[BUFFER_COMPUTE_DST].buffer,
-            r->storage_buffers[BUFFER_COMPUTE_SRC].buffer, false);
-
-        VkBufferMemoryBarrier post_pack_barrier = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = r->storage_buffers[BUFFER_COMPUTE_SRC].buffer,
-            .size = packed_image_size
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
-                             &post_pack_barrier, 0, NULL);
-
-        pgraph_vk_transition_image_layout(pg, cmd, texture->image, vkf.vk_format,
-                                          texture->current_layout,
-                                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        texture->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
-        regions[0] = (VkBufferImageCopy){
-            .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .imageSubresource.mipLevel = 0,
-            .imageSubresource.baseArrayLayer = 0,
-            .imageSubresource.layerCount = 1,
-            .imageOffset = (VkOffset3D){ 0, 0, 0 },
-            .imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 },
-        };
-
-        vkCmdCopyBufferToImage(
-            cmd, r->storage_buffers[BUFFER_COMPUTE_SRC].buffer, texture->image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, regions);
-    }
-
     pgraph_vk_transition_image_layout(
         pg, cmd, surface->image, surface->host_fmt.vk_format,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        surface->color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL :
-                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+    size_t packed_image_size = scaled_width * scaled_height * 4;
+
+    VkBufferMemoryBarrier pre_pack_src_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_COMPUTE_DST].buffer,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL,
+                         1, &pre_pack_src_barrier, 0, NULL);
+
+    VkBufferMemoryBarrier pre_pack_dst_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_COMPUTE_SRC].buffer,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL,
+                         1, &pre_pack_dst_barrier, 0, NULL);
+
+    pgraph_vk_pack_depth_stencil(
+        pg, surface, cmd,
+        r->storage_buffers[BUFFER_COMPUTE_DST].buffer,
+        r->storage_buffers[BUFFER_COMPUTE_SRC].buffer, false);
+
+    VkBufferMemoryBarrier post_pack_src_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_COMPUTE_DST].buffer,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                         &post_pack_src_barrier, 0, NULL);
+
+    VkBufferMemoryBarrier post_pack_dst_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_COMPUTE_SRC].buffer,
+        .size = packed_image_size
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                         &post_pack_dst_barrier, 0, NULL);
+
+    pgraph_vk_transition_image_layout(pg, cmd, texture->image, vkf.vk_format,
+                                      texture->current_layout,
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    texture->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    regions[0] = (VkBufferImageCopy){
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .imageSubresource.mipLevel = 0,
+        .imageSubresource.baseArrayLayer = 0,
+        .imageSubresource.layerCount = 1,
+        .imageOffset = (VkOffset3D){ 0, 0, 0 },
+        .imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 },
+    };
+    vkCmdCopyBufferToImage(
+        cmd, r->storage_buffers[BUFFER_COMPUTE_SRC].buffer, texture->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, regions);
+
+    VkBufferMemoryBarrier post_copy_src_barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = r->storage_buffers[BUFFER_COMPUTE_SRC].buffer,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                         &post_copy_src_barrier, 0, NULL);
 
     pgraph_vk_transition_image_layout(pg, cmd, texture->image, vkf.vk_format,
                                       texture->current_layout,
@@ -944,6 +992,11 @@ static void create_dummy_texture(PGRAPHState *pg)
                           r->storage_buffers[BUFFER_STAGING_SRC].allocation,
                           (void *)&mapped_memory_ptr));
     memset(mapped_memory_ptr, 0xff, texture_data_size);
+
+    vmaFlushAllocation(r->allocator,
+                       r->storage_buffers[BUFFER_STAGING_SRC].allocation, 0,
+                       VK_WHOLE_SIZE);
+
     vmaUnmapMemory(r->allocator,
                    r->storage_buffers[BUFFER_STAGING_SRC].allocation);
 
@@ -1252,15 +1305,15 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     if (is_linear_filter_supported_for_format(r, state.color_format)) {
         vk_mag_filter = pgraph_texture_min_filter_vk_map[mag_filter];
         vk_min_filter = pgraph_texture_min_filter_vk_map[min_filter];
-
-        if (f_basic.linear && vk_mag_filter != vk_min_filter) {
-            // FIXME: Per spec, if coordinates unnormalized, filters must be
-            // same.
-            vk_mag_filter = vk_min_filter = VK_FILTER_LINEAR;
-        }
     } else {
         vk_mag_filter = vk_min_filter = VK_FILTER_NEAREST;
     }
+
+    bool mipmap_en =
+        !f_basic.linear &&
+        !(min_filter == NV_PGRAPH_TEXFILTER0_MIN_BOX_LOD0 ||
+          min_filter == NV_PGRAPH_TEXFILTER0_MIN_TENT_LOD0 ||
+          min_filter == NV_PGRAPH_TEXFILTER0_MIN_CONVOLUTION_2D_LOD0);
 
     bool mipmap_nearest =
         f_basic.linear || image_create_info.mipLevels == 1 ||
@@ -1284,13 +1337,12 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         // .anisotropyEnable = VK_TRUE,
         // .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
         .borderColor = vk_border_color,
-        .unnormalizedCoordinates = f_basic.linear ? VK_TRUE : VK_FALSE,
         .compareEnable = VK_FALSE,
         .compareOp = VK_COMPARE_OP_ALWAYS,
         .mipmapMode = mipmap_nearest ? VK_SAMPLER_MIPMAP_MODE_NEAREST :
                                        VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .minLod = 0.0,
-        .maxLod = f_basic.linear ? 0.0 : image_create_info.mipLevels,
+        .minLod = mipmap_en ? MIN(state.min_mipmap_level, state.levels - 1) : 0.0,
+        .maxLod = mipmap_en ? MIN(state.max_mipmap_level, state.levels - 1) : 0.0,
         .mipLodBias = 0.0,
         .pNext = sampler_next_struct,
     };
@@ -1489,12 +1541,16 @@ void pgraph_vk_finalize_textures(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    assert(!r->in_command_buffer);
+
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
         r->texture_bindings[i] = NULL;
     }
 
     destroy_dummy_texture(r);
     texture_cache_finalize(r);
+
+    assert(r->texture_cache.num_used == 0);
 
     g_free(r->texture_format_properties);
     r->texture_format_properties = NULL;
