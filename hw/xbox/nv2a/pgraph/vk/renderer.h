@@ -343,6 +343,7 @@ typedef struct PGRAPHVkState {
     VkVertexInputBindingDescription vertex_binding_descriptions[NV2A_VERTEXSHADER_ATTRIBUTES];
     int num_active_vertex_binding_descriptions;
     hwaddr vertex_attribute_offsets[NV2A_VERTEXSHADER_ATTRIBUTES];
+    uint16_t vertex_buffer_inline;
 
     QTAILQ_HEAD(, SurfaceBinding) surfaces;
     QTAILQ_HEAD(, SurfaceBinding) invalid_surfaces;
@@ -391,7 +392,8 @@ void pgraph_vk_check_memory_budget(PGRAPHState *pg);
 
 // debug.c
 void pgraph_vk_debug_init(void);
-void pgraph_vk_insert_debug_marker(PGRAPHVkState *r, VkCommandBuffer cmd, const char* name, float color[4]);
+void pgraph_vk_insert_debug_marker(PGRAPHVkState *r, VkCommandBuffer cmd,
+                                   float color[4], const char *format, ...) __attribute__ ((format (printf, 4, 5)));
 
 // instance.c
 void pgraph_vk_init_instance(PGRAPHState *pg, Error **errp);
