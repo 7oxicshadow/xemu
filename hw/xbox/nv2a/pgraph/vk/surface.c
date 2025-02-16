@@ -1,7 +1,7 @@
 /*
  * Geforce NV2A PGRAPH Vulkan Renderer
  *
- * Copyright (c) 2024 Matt Borgerson
+ * Copyright (c) 2024-2025 Matt Borgerson
  *
  * Based on GL implementation:
  *
@@ -191,6 +191,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
     pgraph_apply_scaling_factor(pg, &scaled_width, &scaled_height);
 
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+    pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
 
     pgraph_vk_transition_image_layout(
         pg, cmd, surface->image, surface->host_fmt.vk_format,
@@ -283,19 +284,20 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                              BUFFER_STAGING_DST;
     VkBuffer copy_buffer = r->storage_buffers[copy_buffer_idx].buffer;
 
-    VkBufferMemoryBarrier pre_copy_dst_barrier = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer = copy_buffer,
-        .size = VK_WHOLE_SIZE
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
-                         &pre_copy_dst_barrier, 0, NULL);
-
+    {
+        VkBufferMemoryBarrier pre_copy_dst_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = copy_buffer,
+            .size = VK_WHOLE_SIZE
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                             &pre_copy_dst_barrier, 0, NULL);
+    }
     vkCmdCopyImageToBuffer(cmd, surface_image_loc,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copy_buffer,
                            num_copy_regions, copy_regions);
@@ -432,6 +434,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                          &post_copy_dst_barrier, 0, NULL);
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_1);
+    pgraph_vk_end_debug_marker(r, cmd);
     pgraph_vk_end_single_time_commands(pg, cmd);
 
     void *mapped_memory_ptr = NULL;
@@ -544,12 +547,12 @@ static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
 {
     if (tcg_enabled()) {
         qemu_mutex_unlock(&d->pgraph.lock);
-        qemu_mutex_lock_iothread();
+        bql_lock();
         mem_access_callback_insert(qemu_get_cpu(0),
             d->vram, surface->vram_addr, surface->size,
             &surface->access_cb, &surface_access_callback,
             surface);
-        qemu_mutex_unlock_iothread();
+        bql_unlock();
         qemu_mutex_lock(&d->pgraph.lock);
     }
 }
@@ -559,9 +562,9 @@ static void unregister_cpu_access_callback(NV2AState *d,
 {
     if (tcg_enabled()) {
         qemu_mutex_unlock(&d->pgraph.lock);
-        qemu_mutex_lock_iothread();
+        bql_lock();
         mem_access_callback_remove_by_ref(qemu_get_cpu(0), surface->access_cb);
-        qemu_mutex_unlock_iothread();
+        bql_unlock();
         qemu_mutex_lock(&d->pgraph.lock);
     }
 }
@@ -782,6 +785,8 @@ static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
 
     // FIXME: Go right into main command buffer
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+    pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
+
     pgraph_vk_transition_image_layout(
         pg, cmd, surface->image, surface->host_fmt.vk_format,
         VK_IMAGE_LAYOUT_UNDEFINED,
@@ -789,6 +794,7 @@ static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_3);
+    pgraph_vk_end_debug_marker(r, cmd);
     pgraph_vk_end_single_time_commands(pg, cmd);
     nv2a_profile_inc_counter(NV2A_PROF_SURF_CREATE);
 }
@@ -977,6 +983,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     vmaUnmapMemory(r->allocator, copy_buffer->allocation);
 
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+    pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
 
     VkBufferMemoryBarrier host_barrier = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -1173,10 +1180,6 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
                    !use_compute_to_convert_depth_stencil_format;
 
     if (upscale) {
-        unsigned int scaled_width = surface->width,
-                     scaled_height = surface->height;
-        pgraph_apply_scaling_factor(pg, &scaled_width, &scaled_height);
-
         VkImageBlit blitRegion = {
             .srcSubresource.aspectMask = surface->host_fmt.aspect,
             .srcSubresource.mipLevel = 0,
@@ -1226,6 +1229,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_2);
+    pgraph_vk_end_debug_marker(r, cmd);
     pgraph_vk_end_single_time_commands(pg, cmd);
 
     surface->initialized = true;

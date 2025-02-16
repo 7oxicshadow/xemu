@@ -628,10 +628,9 @@ static bool check_render_pass_dirty(PGRAPHState *pg)
 static bool check_pipeline_dirty(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    assert(r->pipeline_binding);
 
-    if (r->shader_bindings_changed || r->texture_bindings_changed ||
-        check_render_pass_dirty(pg)) {
+    if (!r->pipeline_binding || r->shader_bindings_changed ||
+        r->texture_bindings_changed || check_render_pass_dirty(pg)) {
         return true;
     }
 
@@ -707,7 +706,12 @@ static void create_pipeline(PGRAPHState *pg)
 
     // FIXME: If nothing was dirty, don't even try creating the key or hashing.
     //        Just use the same pipeline.
-    if (r->pipeline_binding && !check_pipeline_dirty(pg)) {
+    bool pipeline_dirty = check_pipeline_dirty(pg);
+
+    pgraph_clear_dirty_reg_map(pg);
+    // FIXME: We could clear less
+
+    if (r->pipeline_binding && !pipeline_dirty) {
         NV2A_VK_DPRINTF("Cache hit");
         NV2A_VK_DGROUP_END();
         return;
@@ -716,12 +720,6 @@ static void create_pipeline(PGRAPHState *pg)
     PipelineKey key;
     init_pipeline_key(pg, &key);
     uint64_t hash = fast_hash((void *)&key, sizeof(key));
-
-    static uint64_t last_hash;
-    if (hash == last_hash) {
-        nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_MERGE);
-    }
-    last_hash = hash;
 
     LruNode *node = lru_lookup(&r->pipeline_cache, hash, &key);
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
@@ -1008,6 +1006,7 @@ static void create_pipeline(PGRAPHState *pg)
     // FIXME: No direct analog. Just do it with MSAA.
     // }
 
+
     VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
@@ -1262,9 +1261,9 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     assert(!r->in_draw);
+    assert(r->debug_depth == 0);
 
     if (r->in_command_buffer) {
-
         nv2a_profile_inc_counter(finish_reason_to_counter_enum[finish_reason]);
 
         if (r->in_render_pass) {
@@ -1533,9 +1532,6 @@ static void end_draw(PGRAPHState *pg)
     }
 
     r->in_draw = false;
-
-    // FIXME: We could clear less
-    pgraph_clear_dirty_reg_map(pg);
 }
 
 void pgraph_vk_draw_end(NV2AState *d)
@@ -1702,26 +1698,30 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     uint32_t clearrectx = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTX);
     uint32_t clearrecty = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY);
 
-    int xmin = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMIN);
-    int xmax = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMAX);
-    int ymin = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMIN);
-    int ymax = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMAX);
+    unsigned int xmin = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMIN);
+    unsigned int xmax = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMAX);
+    unsigned int ymin = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMIN);
+    unsigned int ymax = GET_MASK(clearrecty, NV_PGRAPH_CLEARRECTY_YMAX);
 
     NV2A_VK_DGROUP_BEGIN("CLEAR min=(%d,%d) max=(%d,%d)%s%s", xmin, ymin, xmax,
                          ymax, write_color ? " color" : "",
                          write_zeta ? " zeta" : "");
 
     begin_pre_draw(pg);
+    pgraph_vk_begin_debug_marker(r, r->command_buffer,
+        RGBA_BLUE, "Clear %08" HWADDR_PRIx,
+        binding->vram_addr);
     begin_draw(pg);
 
-    // FIXME: What does hardware do when min <= max?
+    // FIXME: What does hardware do when min >= max?
+    // FIXME: What does hardware do when min >= surface size?
     xmin = MIN(xmin, binding->width - 1);
     ymin = MIN(ymin, binding->height - 1);
-    xmax = MIN(xmax, binding->width - 1);
-    ymax = MIN(ymax, binding->height - 1);
+    xmax = MAX(xmin, MIN(xmax, binding->width - 1));
+    ymax = MAX(ymin, MIN(ymax, binding->height - 1));
 
-    int scissor_width = MAX(0, xmax - xmin + 1),
-        scissor_height = MAX(0, ymax - ymin + 1);
+    unsigned int scissor_width = MAX(0, xmax - xmin + 1);
+    unsigned int scissor_height = MAX(0, ymax - ymin + 1);
 
     pgraph_apply_anti_aliasing_factor(pg, &xmin, &ymin);
     pgraph_apply_anti_aliasing_factor(pg, &scissor_width, &scissor_height);
@@ -1790,6 +1790,7 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
                               1, &clear_rect);
     }
     end_draw(pg);
+    pgraph_vk_end_debug_marker(r, r->command_buffer);
 
     pg->clearing = false;
 
@@ -1930,7 +1931,8 @@ typedef struct VertexBufferRemap {
     size_t buffer_space_required;
     struct {
         VkDeviceAddress offset;
-        VkDeviceSize stride;
+        VkDeviceSize old_stride;
+        VkDeviceSize new_stride;
     } map[NV2A_VERTEXSHADER_ATTRIBUTES];
 } VertexBufferRemap;
 
@@ -1967,21 +1969,35 @@ static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
 
         remap.attributes |= 1 << attr_id;
         remap.map[attr_id].offset = ROUND_UP(output_offset, element_size);
-        remap.map[attr_id].stride = element_size * element_count;
+        remap.map[attr_id].old_stride = desc->stride;
+        remap.map[attr_id].new_stride = element_size * element_count;
 
         // fprintf(stderr,
         //         "attr %02d remapped: "
         //         "%08" HWADDR_PRIx "->%08" HWADDR_PRIx " "
         //         "stride=%d->%zd\n",
         //         attr_id, r->vertex_attribute_offsets[attr_id],
-        //         remap.map[attr_id].offset, desc->stride,
-        //         remap.map[attr_id].stride);
+        //         remap.map[attr_id].offset,
+        //         remap.map[attr_id].old_stride,
+        //         remap.map[attr_id].new_stride);
 
         output_offset =
-            remap.map[attr_id].offset + remap.map[attr_id].stride * num_vertices;
+            remap.map[attr_id].offset + remap.map[attr_id].new_stride * num_vertices;
+        desc->stride = remap.map[attr_id].new_stride;
     }
 
     remap.buffer_space_required = output_offset;
+
+    // reserve space
+    if (remap.attributes) {
+        StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
+        VkDeviceSize starting_offset = ROUND_UP(buffer->buffer_offset, 16);
+        size_t total_space_required =
+            (starting_offset - buffer->buffer_offset) + remap.buffer_space_required;
+        ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING, total_space_required);
+        buffer->buffer_offset = ROUND_UP(buffer->buffer_offset, 16);
+    }
+
     return remap;
 }
 
@@ -1994,20 +2010,12 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
     PGRAPHVkState *r = pg->vk_renderer_state;
     StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
 
-    r->vertex_buffer_inline = remap.attributes;
-
     if (!remap.attributes) {
         return;
     }
 
-    VkDeviceSize starting_offset = ROUND_UP(buffer->buffer_offset, 16);
-    size_t total_space_required =
-        (starting_offset - buffer->buffer_offset) + remap.buffer_space_required;
-    ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING, total_space_required);
     assert(pgraph_vk_buffer_has_space_for(pg, BUFFER_VERTEX_INLINE_STAGING,
-                                          total_space_required, 1));
-
-    buffer->buffer_offset = starting_offset; // Aligned
+                                          remap.buffer_space_required, 256));
 
     // FIXME: SIMD memcpy
     // FIXME: Caching
@@ -2021,13 +2029,6 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
             continue;
         }
 
-        int bind_desc_loc =
-            r->vertex_attribute_to_description_location[attr_id];
-        assert(bind_desc_loc >= 0);
-
-        VkVertexInputBindingDescription *bind_desc =
-            &r->vertex_binding_descriptions[bind_desc_loc];
-
         VkDeviceSize attr_buffer_offset =
             buffer->buffer_offset + remap.map[attr_id].offset;
 
@@ -2035,14 +2036,14 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
         uint8_t *in_ptr = d->vram_ptr + r->vertex_attribute_offsets[attr_id];
 
         for (int vertex_id = 0; vertex_id < num_vertices; vertex_id++) {
-            memcpy(out_ptr, in_ptr, remap.map[attr_id].stride);
-            out_ptr += remap.map[attr_id].stride;
-            in_ptr += bind_desc->stride;
+            memcpy(out_ptr, in_ptr, remap.map[attr_id].new_stride);
+            out_ptr += remap.map[attr_id].new_stride;
+            in_ptr += remap.map[attr_id].old_stride;
         }
 
         r->vertex_attribute_offsets[attr_id] = attr_buffer_offset;
-        bind_desc->stride = remap.map[attr_id].stride;
     }
+
 
     buffer->buffer_offset += remap.buffer_space_required;
 }
@@ -2078,9 +2079,11 @@ void pgraph_vk_flush_draw(NV2AState *d)
         }
         sync_vertex_ram_buffer(pg);
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element);
-        copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
 
         begin_pre_draw(pg);
+        copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Draw Arrays");
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
         for (int i = 0; i < pg->draw_arrays_length; i++) {
@@ -2090,6 +2093,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
             vkCmdDraw(r->command_buffer, count, 1, start, 0);
         }
         end_draw(pg);
+        pgraph_vk_end_debug_marker(r, r->command_buffer);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_elements_length) {
@@ -2115,11 +2119,13 @@ void pgraph_vk_flush_draw(NV2AState *d)
             pg->inline_elements[pg->inline_elements_length - 1]);
         sync_vertex_ram_buffer(pg);
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
-        copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
 
         begin_pre_draw(pg);
+        copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
         VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
             pg, pg->inline_elements, index_data_size);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Inline Elements");
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
         vkCmdBindIndexBuffer(r->command_buffer,
@@ -2128,6 +2134,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         vkCmdDrawIndexed(r->command_buffer, pg->inline_elements_length, 1, 0, 0,
                          0);
         end_draw(pg);
+        pgraph_vk_end_debug_marker(r, r->command_buffer);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_buffer_length) {
@@ -2158,10 +2165,13 @@ void pgraph_vk_flush_draw(NV2AState *d)
         begin_pre_draw(pg);
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, data, sizes, r->num_active_vertex_attribute_descriptions);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Inline Buffer");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
         vkCmdDraw(r->command_buffer, pg->inline_buffer_length, 1, 0, 0);
         end_draw(pg);
+        pgraph_vk_end_debug_marker(r, r->command_buffer);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_array_length) {
@@ -2199,10 +2209,13 @@ void pgraph_vk_flush_draw(NV2AState *d)
         void *inline_array_data = pg->inline_array;
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, &inline_array_data, &inline_array_data_size, 1);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Inline Array");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
         vkCmdDraw(r->command_buffer, index_count, 1, 0, 0);
         end_draw(pg);
+        pgraph_vk_end_debug_marker(r, r->command_buffer);
         NV2A_VK_DGROUP_END();
     } else {
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");

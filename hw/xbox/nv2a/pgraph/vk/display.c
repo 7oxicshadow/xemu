@@ -1,7 +1,7 @@
 /*
  * Geforce NV2A PGRAPH Vulkan Renderer
  *
- * Copyright (c) 2024 Matt Borgerson
+ * Copyright (c) 2024-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +18,7 @@
  */
 
 #include "renderer.h"
+#include <math.h>
 
 static uint8_t *convert_texture_data__CR8YB8CB8YA8(uint8_t *data_out,
                                                    const uint8_t *data_in,
@@ -218,9 +219,9 @@ static const char *display_frag_glsl =
     "void main()\n"
     "{\n"
     "    vec2 tex_coord = gl_FragCoord.xy/display_size;\n"
-    "    tex_coord.y = 1 - tex_coord.y;\n" // GL compat
     "    float rel = display_size.y/textureSize(tex, 0).y/line_offset;\n"
     "    tex_coord.y = 1 + rel*(tex_coord.y - 1);"
+    "    tex_coord.y = 1 - tex_coord.y;\n" // GL compat
     "    out_Color.rgba = texture(tex, tex_coord);\n"
     "    if (pvideo_enable) {\n"
     "        vec2 screen_coord = vec2(gl_FragCoord.x, display_size.y - gl_FragCoord.y) * pvideo_scale.z;\n"
@@ -618,7 +619,11 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
 
     VkExternalMemoryImageCreateInfo external_memory_image_create_info = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+#ifdef WIN32
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+#else
         .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+#endif
     };
     image_create_info.pNext = &external_memory_image_create_info;
 
@@ -649,8 +654,7 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
     alloc_info.pNext = &export_memory_alloc_info;
 
     VK_CHECK(vkAllocateMemory(r->device, &alloc_info, NULL, &d->memory));
-
-    vkBindImageMemory(r->device, d->image, d->memory, 0);
+    VK_CHECK(vkBindImageMemory(r->device, d->image, d->memory, 0));
 
     // Create Image View
     VkImageViewCreateInfo image_view_create_info = {
@@ -866,9 +870,11 @@ static void update_uniforms(PGRAPHState *pg, SurfaceBinding *surface)
     int display_size_loc = uniform_index(l, "display_size");  // FIXME: Cache
     uniform2f(l, display_size_loc, r->display.width, r->display.height);
 
-    uint32_t pline_offset, pstart_addr, pline_compare;
-    d->vga.get_offsets(&d->vga, &pline_offset, &pstart_addr, &pline_compare);
-    int line_offset = surface->pitch / pline_offset;
+    VGADisplayParams vga_display_params;
+    d->vga.get_params(&d->vga, &vga_display_params);
+    int line_offset = vga_display_params.line_offset ?
+                          surface->pitch / vga_display_params.line_offset :
+                          1;
     int line_offset_loc = uniform_index(l, "line_offset");
     uniform1f(l, line_offset_loc, line_offset);
 
@@ -894,17 +900,16 @@ static void update_uniforms(PGRAPHState *pg, SurfaceBinding *surface)
 
 static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
 {
+    NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
     PGRAPHVkDisplayState *disp = &r->display;
-
-    if (disp->draw_time >= surface->draw_time) {
-        return;
-    }
 
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_PRESENTING);
     }
+
+    pgraph_vk_upload_surface_data(d, surface, !tcg_enabled());
 
     disp->pvideo.state = get_pvideo_state(pg);
     if (disp->pvideo.state.enabled) {
@@ -915,6 +920,8 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
     update_descriptor_set(pg, surface);
 
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+    pgraph_vk_begin_debug_marker(r, cmd, RGBA_YELLOW,
+        "Display Surface %08"HWADDR_PRIx, surface->vram_addr);
 
     pgraph_vk_transition_image_layout(pg, cmd, surface->image,
                                       surface->host_fmt.vk_format,
@@ -990,6 +997,7 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
+    pgraph_vk_end_debug_marker(r, cmd);
     pgraph_vk_end_single_time_commands(pg, cmd);
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_5);
 
@@ -1059,11 +1067,11 @@ void pgraph_vk_render_display(PGRAPHState *pg)
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    uint32_t pline_offset, pstart_addr, pline_compare;
-    d->vga.get_offsets(&d->vga, &pline_offset, &pstart_addr, &pline_compare);
+    VGADisplayParams vga_display_params;
+    d->vga.get_params(&d->vga, &vga_display_params);
 
-    SurfaceBinding *surface =
-        pgraph_vk_surface_get_within(d, d->pcrtc.start + pline_offset);
+    SurfaceBinding *surface = pgraph_vk_surface_get_within(
+        d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color) {
         return;
     }

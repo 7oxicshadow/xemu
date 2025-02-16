@@ -250,9 +250,9 @@ static MString* get_var(struct PixelShader *ps, int reg, bool is_dest)
         break;
     case PS_REGISTER_C0:
         if (ps->flags & PS_COMBINERCOUNT_UNIQUE_C0 || ps->cur_stage == 8) {
-            MString *reg = mstring_from_fmt("c0_%d", ps->cur_stage);
-            add_const_ref(ps, mstring_get_str(reg));
-            return reg;
+            MString *reg_name = mstring_from_fmt("c0_%d", ps->cur_stage);
+            add_const_ref(ps, mstring_get_str(reg_name));
+            return reg_name;
         } else {  // Same c0
             add_const_ref(ps, "c0_0");
             return mstring_from_str("c0_0");
@@ -260,9 +260,9 @@ static MString* get_var(struct PixelShader *ps, int reg, bool is_dest)
         break;
     case PS_REGISTER_C1:
         if (ps->flags & PS_COMBINERCOUNT_UNIQUE_C1 || ps->cur_stage == 8) {
-            MString *reg = mstring_from_fmt("c1_%d", ps->cur_stage);
-            add_const_ref(ps, mstring_get_str(reg));
-            return reg;
+            MString *reg_name = mstring_from_fmt("c1_%d", ps->cur_stage);
+            add_const_ref(ps, mstring_get_str(reg_name));
+            return reg_name;
         } else {  // Same c1
             add_const_ref(ps, "c1_0");
             return mstring_from_str("c1_0");
@@ -589,8 +589,10 @@ static const char *get_sampler_type(enum PS_TEXTUREMODES mode, const PshState *s
             fprintf(stderr, "Shadow map support not implemented for mode %d\n", mode);
             assert(!"Shadow map support not implemented for this mode");
         }
-        assert(state->dim_tex[i] == 2);
-        return sampler2D;
+        if (state->dim_tex[i] == 2) return sampler2D;
+        if (state->dim_tex[i] == 3 && mode != PS_TEXTUREMODES_DOT_ST) return sampler3D;
+        assert(!"Unhandled texture dimensions");
+        return NULL;
 
     case PS_TEXTUREMODES_PROJECT3D:
     case PS_TEXTUREMODES_DOT_STR_3D:
@@ -726,8 +728,6 @@ static void apply_convolution_filter(const struct PixelShader *ps, MString *vars
 
 static MString* psh_convert(struct PixelShader *ps)
 {
-    int i;
-
     const char *u = ps->state.vulkan ? "" : "uniform "; // FIXME: Remove
 
     MString *preflight = mstring_new();
@@ -893,7 +893,7 @@ static MString* psh_convert(struct PixelShader *ps)
 
     ps->code = mstring_new();
 
-    for (i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++) {
 
         const char *sampler_type = get_sampler_type(ps->tex_modes[i], &ps->state, i);
 
@@ -967,10 +967,18 @@ static MString* psh_convert(struct PixelShader *ps)
                                    i, ps->input_tex[i], ps->input_tex[i]);
             }
 
-            mstring_append_fmt(vars, "dsdt%d = bumpMat%d * dsdt%d;\n",
-                i, i, i, i);
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdt%d));\n",
-                i, i, tex_remap, i, i);
+            mstring_append_fmt(vars, "dsdt%d = bumpMat%d * dsdt%d;\n", i, i, i);
+
+            if (ps->state.dim_tex[i] == 2) {
+                mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdt%d));\n",
+                    i, i, tex_remap, i, i);
+            } else if (ps->state.dim_tex[i] == 3) {
+                // FIXME: Does hardware pass through the r/z coordinate or is it 0?
+                mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, vec3(pT%d.xy + dsdt%d, pT%d.z));\n",
+                    i, i, i, i, i);
+            } else {
+                assert(!"Unhandled texture dimensions");
+            }
             break;
         case PS_TEXTUREMODES_BUMPENVMAP_LUM:
             assert(i >= 1);
@@ -986,9 +994,19 @@ static MString* psh_convert(struct PixelShader *ps)
             }
 
             mstring_append_fmt(vars, "dsdtl%d.st = bumpMat%d * dsdtl%d.st;\n",
-                i, i, i, i);
-            mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdtl%d.st));\n",
-                i, i, tex_remap, i, i);
+                               i, i, i);
+
+            if (ps->state.dim_tex[i] == 2) {
+                mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, %s(pT%d.xy + dsdtl%d.st));\n",
+                    i, i, tex_remap, i, i);
+            } else if (ps->state.dim_tex[i] == 3) {
+                // FIXME: Does hardware pass through the r/z coordinate or is it 0?
+                mstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, vec3(pT%d.xy + dsdtl%d.st, pT%d.z));\n",
+                    i, i, i, i, i);
+            } else {
+                assert(!"Unhandled texture dimensions");
+            }
+
             mstring_append_fmt(vars, "t%d = t%d * (bumpScale%d * dsdtl%d.p + bumpOffset%d);\n",
                 i, i, i, i, i);
             break;
@@ -1138,7 +1156,7 @@ static MString* psh_convert(struct PixelShader *ps)
         }
     }
 
-    for (i = 0; i < ps->num_stages; i++) {
+    for (int i = 0; i < ps->num_stages; i++) {
         ps->cur_stage = i;
         mstring_append_fmt(ps->code, "// Stage %d\n", i);
         MString* color = add_stage_code(ps, ps->stage[i].rgb_input, ps->stage[i].rgb_output, "rgb", false);
@@ -1177,7 +1195,7 @@ static MString* psh_convert(struct PixelShader *ps)
         }
     }
 
-    for (i = 0; i < ps->num_var_refs; i++) {
+    for (int i = 0; i < ps->num_var_refs; i++) {
         mstring_append_fmt(vars, "vec4 %s = vec4(0);\n", ps->var_refs[i]);
         if (strcmp(ps->var_refs[i], "r0") == 0) {
             if (ps->tex_modes[0] != PS_TEXTUREMODES_NONE) {

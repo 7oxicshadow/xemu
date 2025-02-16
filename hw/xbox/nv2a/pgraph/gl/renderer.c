@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 espes
  * Copyright (c) 2015 Jannik Vogel
- * Copyright (c) 2018-2024 Matt Borgerson
+ * Copyright (c) 2018-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -38,11 +38,12 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     PGRAPHState *pg = &d->pgraph;
 
     pg->gl_renderer_state = g_malloc0(sizeof(*pg->gl_renderer_state));
+    PGRAPHGLState *r = pg->gl_renderer_state;
 
     /* fire up opengl */
     glo_set_current(g_nv2a_context_render);
 
-#ifdef DEBUG_NV2A_GL
+#if DEBUG_NV2A_GL
     gl_debug_initialize();
 #endif
 
@@ -50,6 +51,9 @@ static void pgraph_gl_init(NV2AState *d, Error **errp)
     assert(glo_check_extension("GL_EXT_texture_compression_s3tc"));
     /*  Internal RGB565 texture format */
     assert(glo_check_extension("GL_ARB_ES2_compatibility"));
+
+    glGetFloatv(GL_SMOOTH_LINE_WIDTH_RANGE, r->supported_smooth_line_width_range);
+    glGetFloatv(GL_ALIASED_LINE_WIDTH_RANGE, r->supported_aliased_line_width_range);
 
     pgraph_gl_init_surfaces(pg);
     pgraph_gl_init_reports(d);

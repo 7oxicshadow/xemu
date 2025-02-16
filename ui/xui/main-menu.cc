@@ -159,6 +159,49 @@ void MainMenuInputView::Draw()
     ImGui::Columns(1);
 
     //
+    // Render device driver combo
+    //
+
+    // List available device drivers
+    const char *driver = bound_drivers[active];
+
+    if (strcmp(driver, DRIVER_DUKE) == 0)
+        driver = DRIVER_DUKE_DISPLAY_NAME;
+    else if (strcmp(driver, DRIVER_S) == 0)
+        driver = DRIVER_S_DISPLAY_NAME;
+    
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo("###InputDrivers", driver,
+                          ImGuiComboFlags_NoArrowButton)) {
+        const char *available_drivers[] = { DRIVER_DUKE, DRIVER_S };
+        const char *driver_display_names[] = { 
+            DRIVER_DUKE_DISPLAY_NAME, 
+            DRIVER_S_DISPLAY_NAME 
+            };
+        bool is_selected = false;
+        int num_drivers = sizeof(driver_display_names) / sizeof(driver_display_names[0]);
+        for (int i = 0; i < num_drivers; i++) {
+            const char *iter = driver_display_names[i];
+            is_selected = strcmp(driver, iter) == 0;
+            ImGui::PushID(iter);
+            if (ImGui::Selectable(iter, is_selected)) {
+                for (int j = 0; j < num_drivers; j++) {
+                    if (iter == driver_display_names[j])
+                        bound_drivers[active] = available_drivers[j];
+                }
+                xemu_input_bind(active, bound_controllers[active], 1);
+            }
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::EndCombo();
+    }
+    DrawComboChevron();
+
+    //
     // Render input device combo
     //
 
@@ -387,9 +430,6 @@ void MainMenuInputView::Draw()
 
                 ImGui::Image(id, xmu_display_size, ImVec2(0.5f * i, 1),
                              ImVec2(0.5f * (i + 1), 0));
-                ImVec2 pos = ImGui::GetCursorPos();
-
-                ImGui::SetCursorPos(pos);
 
                 // Button to generate a new XMU
                 ImGui::PushID(i);
@@ -606,6 +646,7 @@ void MainMenuDisplayView::Draw()
     if (ChevronCombo("Window size", &g_config.display.window.startup_size,
                      "Last Used\0"
                      "640x480\0"
+                     "720x480\0"
                      "1280x720\0"
                      "1280x800\0"
                      "1280x960\0"
@@ -1221,11 +1262,11 @@ void MainMenuSnapshotsView::Draw()
         XemuSnapshotData *data = &g_snapshot_mgr.m_extra_data[i];
 
         int current_snapshot_binding = -1;
-        for (int i = 0; i < 4; ++i) {
-            if (g_strcmp0(*(g_snapshot_shortcut_index_key_map[i]),
+        for (int j = 0; j < 4; ++j) {
+            if (g_strcmp0(*(g_snapshot_shortcut_index_key_map[j]),
                           snapshot->name) == 0) {
                 assert(current_snapshot_binding == -1);
-                current_snapshot_binding = i;
+                current_snapshot_binding = j;
             }
         }
 

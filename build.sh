@@ -158,8 +158,6 @@ target="qemu-system-i386"
 if test ! -z "$debug"; then
     build_cflags='-DXEMU_DEBUG_BUILD=1'
     opts="--enable-debug --enable-trace-backends=log"
-else
-    opts="--enable-lto"
 fi
 
 most_recent_macosx_sdk_ver () {
@@ -215,12 +213,14 @@ case "$platform" in # Adjust compilation options based on platform
 
         python3 ./scripts/download-macos-libs.py ${target_arch}
         lib_prefix=${PWD}/macos-libs/${target_arch}/opt/local
-        export CFLAGS="-arch ${target_arch} \
+        export CFLAGS="${CFLAGS} \
+                       -arch ${target_arch} \
                        -target ${target_arch}-apple-macos${macos_min_ver} \
                        -isysroot ${sdk} \
                        -I${lib_prefix}/include \
                        -mmacosx-version-min=$macos_min_ver"
-        export LDFLAGS="-arch ${target_arch} \
+        export LDFLAGS="${LDFLAGS} \
+                        -arch ${target_arch} \
                         -isysroot ${sdk}"
         if [ "$target_arch" == "x86_64" ]; then
             sys_cflags='-march=ivybridge'
