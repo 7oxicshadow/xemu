@@ -383,6 +383,11 @@ GLSL_DEFINE(materialEmissionColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_CM_COL) ".xyz
         mstring_append(body, "  oD0 = diffuse;\n");
         mstring_append(body, "  oD1 = specular;\n");
     }
+
+    if (!state->specular_enable) {
+        mstring_append(body, "  oD1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
+    }
+
     mstring_append(body, "  oB0 = backDiffuse;\n");
     mstring_append(body, "  oB1 = backSpecular;\n");
 
@@ -409,7 +414,7 @@ GLSL_DEFINE(materialEmissionColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_CM_COL) ".xyz
             mstring_append(body, "  float fogDistance = fogCoord;\n");
             break;
         default:
-            assert(false);
+            assert(!"Invalid foggen mode");
             break;
         }
 
