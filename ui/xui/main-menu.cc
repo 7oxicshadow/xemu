@@ -485,6 +485,8 @@ void MainMenuInputView::Draw()
     SectionTitle("Options");
     Toggle("Auto-bind controllers", &g_config.input.auto_bind,
            "Bind newly connected controllers to any open port");
+    Toggle("Controller vibration", &g_config.input.allow_vibration,
+           "Allows the controllers to vibrate");
     Toggle("Background controller input capture",
            &g_config.input.background_input_capture,
            "Capture even if window is unfocused (requires restart)");
@@ -499,9 +501,6 @@ void MainMenuInputView::Draw()
         char buf2[32];
         char buf3[32];
 
-        Toggle("Globally disable Rumble",
-               &g_config.input.switches.input_disable_rumble,
-               "Disable rumble for all inputs");
         Toggle("Analog Button Simulation",
                &g_config.input.switches.ana_dig_switch,
                "Simulate analog buttons using button hold timers");

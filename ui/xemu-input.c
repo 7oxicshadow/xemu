@@ -697,7 +697,7 @@ int calculate_range_output(int input, int start, int stop)
 
 void xemu_input_update_rumble(ControllerState *state)
 {
-    if ( (!state->rumble_enabled) || (g_config.input.switches.input_disable_rumble == true)) {
+    if (!state->rumble_enabled || !g_config.input.allow_vibration) {
         return;
     }
 

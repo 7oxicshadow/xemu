@@ -51,9 +51,6 @@ input:
       peripheral_type_1: integer
       peripheral_param_1: string
   switches:
-    input_disable_rumble: 
-      type: bool
-      default: 0
     ana_dig_switch: 
       type: bool
       default: 0
@@ -146,6 +143,9 @@ input:
       default: 0
   gamecontrollerdb_path: string
   auto_bind:
+    type: bool
+    default: true
+  allow_vibration:
     type: bool
     default: true
   background_input_capture: bool
