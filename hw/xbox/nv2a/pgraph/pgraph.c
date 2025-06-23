@@ -1411,8 +1411,10 @@ DEF_METHOD(NV097, SET_BLEND_EQUATION)
 
 DEF_METHOD(NV097, SET_DEPTH_FUNC)
 {
-    PG_SET_MASK(NV_PGRAPH_CONTROL_0, NV_PGRAPH_CONTROL_0_ZFUNC,
-             parameter & 0xF);
+    if (parameter >= 0x200 && parameter <= 0x207) {
+        PG_SET_MASK(NV_PGRAPH_CONTROL_0, NV_PGRAPH_CONTROL_0_ZFUNC,
+                    parameter & 0xF);
+    }
 }
 
 DEF_METHOD(NV097, SET_COLOR_MASK)
@@ -1962,6 +1964,12 @@ DEF_METHOD_INC(NV097, SET_COMBINER_COLOR_ICW)
 {
     int slot = (method - NV097_SET_COMBINER_COLOR_ICW) / 4;
     pgraph_reg_w(pg, NV_PGRAPH_COMBINECOLORI0 + slot*4, parameter);
+}
+
+DEF_METHOD_INC(NV097, SET_COLOR_KEY_COLOR)
+{
+    int slot = (method - NV097_SET_COLOR_KEY_COLOR) / 4;
+    pgraph_reg_w(pg, NV_PGRAPH_COLORKEYCOLOR0 + slot * 4, parameter);
 }
 
 DEF_METHOD_INC(NV097, SET_VIEWPORT_SCALE)
