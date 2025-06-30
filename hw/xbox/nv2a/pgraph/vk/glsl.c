@@ -1,7 +1,7 @@
 /*
  * Geforce NV2A PGRAPH Vulkan Renderer
  *
- * Copyright (c) 2024 Matt Borgerson
+ * Copyright (c) 2024-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -269,12 +269,24 @@ static void block_to_uniforms(const SpvReflectBlockVariable *block, ShaderUnifor
 
         assert(member->array.dims_count < 2);
 
+        int dim = 1;
+        for (int i = 0; i < member->array.dims_count; i++) {
+            dim *= member->array.dims[i];
+        }
+        int stride = MAX(member->array.stride, member->numeric.matrix.stride);
+        if (member->numeric.matrix.column_count) {
+            dim *= member->numeric.matrix.column_count;
+            if (member->array.stride) {
+                stride =
+                    member->array.stride / member->numeric.matrix.column_count;
+            }
+        }
         layout->uniforms[k] = (ShaderUniform){
             .name = strdup(member->name),
             .offset = member->offset,
             .dim_v = MAX(1, member->numeric.vector.component_count),
-            .dim_a = MAX(member->array.dims_count ? member->array.dims[0] : 1, member->numeric.matrix.column_count),
-            .stride = MAX(member->array.stride, member->numeric.matrix.stride),
+            .dim_a = dim,
+            .stride = stride,
         };
 
         // fprintf(stderr, "<%s offset=%zd dim_v=%zd dim_a=%zd stride=%zd>\n",

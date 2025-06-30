@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2015 espes
  * Copyright (c) 2015 Jannik Vogel
- * Copyright (c) 2020-2024 Matt Borgerson
+ * Copyright (c) 2020-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,19 +19,31 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "hw/xbox/nv2a/pgraph/shaders.h"
-#include "common.h"
+#include "qemu/osdep.h"
+#include "hw/xbox/nv2a/pgraph/pgraph.h"
 #include "geom.h"
 
-MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
-                              enum ShaderPolygonMode polygon_back_mode,
-                              enum ShaderPrimitiveMode primitive_mode,
-                              bool smooth_shading,
-                              bool vulkan)
+void pgraph_glsl_set_geom_state(PGRAPHState *pg, GeomState *state)
+{
+    state->primitive_mode = (enum ShaderPrimitiveMode)pg->primitive_mode;
+
+    state->polygon_front_mode = (enum ShaderPolygonMode)GET_MASK(
+        pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+        NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+    state->polygon_back_mode = (enum ShaderPolygonMode)GET_MASK(
+        pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+        NV_PGRAPH_SETUPRASTER_BACKFACEMODE);
+
+    state->smooth_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                     NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                            NV_PGRAPH_CONTROL_3_SHADEMODE_SMOOTH;
+}
+
+MString *pgraph_glsl_gen_geom(const GeomState *state, GenGeomGlslOptions opts)
 {
     /* FIXME: Missing support for 2-sided-poly mode */
-    assert(polygon_front_mode == polygon_back_mode);
-    enum ShaderPolygonMode polygon_mode = polygon_front_mode;
+    assert(state->polygon_front_mode == state->polygon_back_mode);
+    enum ShaderPolygonMode polygon_mode = state->polygon_front_mode;
 
     /* POINT mode shouldn't require any special work */
     if (polygon_mode == POLY_MODE_POINT) {
@@ -42,7 +54,7 @@ MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
     const char *layout_in = NULL;
     const char *layout_out = NULL;
     const char *body = NULL;
-    switch (primitive_mode) {
+    switch (state->primitive_mode) {
     case PRIM_TYPE_POINTS: return NULL;
     case PRIM_TYPE_LINES: return NULL;
     case PRIM_TYPE_LINE_LOOP: return NULL;
@@ -145,7 +157,7 @@ MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
             return NULL;
         }
         if (polygon_mode == POLY_MODE_FILL) {
-            if (smooth_shading) {
+            if (state->smooth_shading) {
                 return NULL;
             }
             layout_in = "layout(triangles) in;\n";
@@ -169,16 +181,19 @@ MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
     assert(layout_in);
     assert(layout_out);
     assert(body);
-    MString *s = mstring_new();
-    mstring_append_fmt(s, "#version %d\n\n", vulkan ? 450 : 400);
-    mstring_append(s, layout_in);
-    mstring_append(s, layout_out);
-    mstring_append(s, "\n");
-    pgraph_get_glsl_vtx_header(s, vulkan, smooth_shading, true, true, true);
-    pgraph_get_glsl_vtx_header(s, vulkan, smooth_shading, false, false, false);
+    MString *output =
+        mstring_from_fmt("#version %d\n\n"
+                         "%s"
+                         "%s"
+                         "\n",
+                         opts.vulkan ? 450 : 400, layout_in, layout_out);
+    pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading, true,
+                               true, true);
+    pgraph_glsl_get_vtx_header(output, opts.vulkan, state->smooth_shading,
+                               false, false, false);
 
-    if (smooth_shading) {
-        mstring_append(s,
+    if (state->smooth_shading) {
+        mstring_append(output,
                        "void emit_vertex(int index, int _unused) {\n"
                        "  gl_Position = gl_in[index].gl_Position;\n"
                        "  gl_PointSize = gl_in[index].gl_PointSize;\n"
@@ -194,7 +209,7 @@ MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
                        "  EmitVertex();\n"
                        "}\n");
     } else {
-        mstring_append(s,
+        mstring_append(output,
                        "void emit_vertex(int index, int provoking_index) {\n"
                        "  gl_Position = gl_in[index].gl_Position;\n"
                        "  gl_PointSize = gl_in[index].gl_PointSize;\n"
@@ -211,10 +226,12 @@ MString *pgraph_gen_geom_glsl(enum ShaderPolygonMode polygon_front_mode,
                        "}\n");
     }
 
-    mstring_append(s, "\n"
-                      "void main() {\n");
-    mstring_append(s, body);
-    mstring_append(s, "}\n");
+    mstring_append_fmt(output,
+                       "\n"
+                       "void main() {\n"
+                       "%s"
+                       "}\n",
+                       body);
 
-    return s;
+    return output;
 }

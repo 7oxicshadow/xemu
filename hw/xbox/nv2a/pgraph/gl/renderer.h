@@ -33,7 +33,7 @@
 #include "hw/xbox/nv2a/nv2a_regs.h"
 #include "hw/xbox/nv2a/pgraph/surface.h"
 #include "hw/xbox/nv2a/pgraph/texture.h"
-#include "hw/xbox/nv2a/pgraph/shaders.h"
+#include "hw/xbox/nv2a/pgraph/glsl/shaders.h"
 
 #include "gloffscreen.h"
 #include "constants.h"
@@ -96,40 +96,10 @@ typedef struct ShaderBinding {
     GLuint gl_program;
     GLenum gl_primitive_mode;
 
-    GLint psh_constant_loc[9][2];
-    GLint alpha_ref_loc;
-
-    GLint bump_mat_loc[NV2A_MAX_TEXTURES];
-    GLint bump_scale_loc[NV2A_MAX_TEXTURES];
-    GLint bump_offset_loc[NV2A_MAX_TEXTURES];
-    GLint tex_scale_loc[NV2A_MAX_TEXTURES];
-
-    GLint surface_size_loc;
-    GLint clip_range_loc;
-    GLint depth_offset_loc;
-
-    GLint vsh_constant_loc[NV2A_VERTEXSHADER_CONSTANTS];
-    uint32_t vsh_constants[NV2A_VERTEXSHADER_CONSTANTS][4];
-
-    GLint ltctxa_loc[NV2A_LTCTXA_COUNT];
-    GLint ltctxb_loc[NV2A_LTCTXB_COUNT];
-    GLint ltc1_loc[NV2A_LTC1_COUNT];
-
-    GLint fog_color_loc;
-    GLint fog_param_loc;
-    GLint light_infinite_half_vector_loc[NV2A_MAX_LIGHTS];
-    GLint light_infinite_direction_loc[NV2A_MAX_LIGHTS];
-    GLint light_local_position_loc[NV2A_MAX_LIGHTS];
-    GLint light_local_attenuation_loc[NV2A_MAX_LIGHTS];
-    int specular_power_loc;
-
-    GLint clip_region_loc[8];
-
-    GLint point_params_loc[8];
-    GLint material_alpha_loc;
-
-    GLint color_key_loc[4];
-    GLint color_key_mask_loc[4];
+    struct {
+        PshUniformLocs psh;
+        VshUniformLocs vsh;
+    } uniform_locs;
 } ShaderBinding;
 
 typedef struct VertexKey {

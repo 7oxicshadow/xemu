@@ -1,7 +1,7 @@
 /*
  * Geforce NV2A PGRAPH Vulkan Renderer
  *
- * Copyright (c) 2024 Matt Borgerson
+ * Copyright (c) 2024-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,7 +29,7 @@
 #include "hw/xbox/nv2a/nv2a_regs.h"
 #include "hw/xbox/nv2a/pgraph/surface.h"
 #include "hw/xbox/nv2a/pgraph/texture.h"
-#include "hw/xbox/nv2a/pgraph/shaders.h"
+#include "hw/xbox/nv2a/pgraph/glsl/shaders.h"
 
 #include <vulkan/vulkan.h>
 #include <glslang/Include/glslang_c_interface.h>
@@ -164,42 +164,10 @@ typedef struct ShaderBinding {
     ShaderModuleInfo *vertex;
     ShaderModuleInfo *fragment;
 
-    int psh_constant_loc[9][2];
-    int alpha_ref_loc;
-
-    int bump_mat_loc[NV2A_MAX_TEXTURES];
-    int bump_scale_loc[NV2A_MAX_TEXTURES];
-    int bump_offset_loc[NV2A_MAX_TEXTURES];
-    int tex_scale_loc[NV2A_MAX_TEXTURES];
-
-    int surface_size_loc;
-    int clip_range_loc;
-    int clip_range_floc;
-    int depth_offset_loc;
-
-    int vsh_constant_loc;
-    uint32_t vsh_constants[NV2A_VERTEXSHADER_CONSTANTS][4];
-
-    int ltctxa_loc;
-    int ltctxb_loc;
-    int ltc1_loc;
-
-    int fog_color_loc;
-    int fog_param_loc;
-    int light_infinite_half_vector_loc[NV2A_MAX_LIGHTS];
-    int light_infinite_direction_loc[NV2A_MAX_LIGHTS];
-    int light_local_position_loc[NV2A_MAX_LIGHTS];
-    int light_local_attenuation_loc[NV2A_MAX_LIGHTS];
-    int specular_power_loc;
-    int point_params_loc;
-
-    int clip_region_loc;
-    int material_alpha_loc;
-
-    int color_key_loc;
-    int color_key_mask_loc;
-
-    int uniform_attrs_loc;
+    struct {
+        PshUniformLocs psh;
+        VshUniformLocs vsh;
+    } uniform_locs;
 } ShaderBinding;
 
 typedef struct TextureKey {
@@ -410,6 +378,7 @@ typedef struct PGRAPHVkState {
     ShaderBinding *shader_binding;
     ShaderModuleInfo *quad_vert_module, *solid_frag_module;
     bool shader_bindings_changed;
+    bool use_push_constants_for_uniform_attrs;
 
     // FIXME: Merge these into a structure
     uint64_t uniform_buffer_hashes[2];
@@ -555,7 +524,6 @@ void pgraph_vk_init_shaders(PGRAPHState *pg);
 void pgraph_vk_finalize_shaders(PGRAPHState *pg);
 void pgraph_vk_update_descriptor_sets(PGRAPHState *pg);
 void pgraph_vk_bind_shaders(PGRAPHState *pg);
-void pgraph_vk_update_shader_uniforms(PGRAPHState *pg);
 
 // reports.c
 void pgraph_vk_init_reports(PGRAPHState *pg);
