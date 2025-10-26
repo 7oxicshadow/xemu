@@ -54,10 +54,6 @@ static VkPrimitiveTopology get_primitive_topology(PGRAPHState *pg)
     int polygon_mode = r->shader_binding->state.geom.polygon_front_mode;
     int primitive_mode = r->shader_binding->state.geom.primitive_mode;
 
-    if (polygon_mode == POLY_MODE_POINT) {
-        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-    }
-
     // FIXME: Replace with LUT
     switch (primitive_mode) {
     case PRIM_TYPE_POINTS:
@@ -93,7 +89,8 @@ static VkPrimitiveTopology get_primitive_topology(PGRAPHState *pg)
     }
 }
 
-static void pipeline_cache_entry_init(Lru *lru, LruNode *node, void *state)
+static void pipeline_cache_entry_init(Lru *lru, LruNode *node,
+                                      const void *state)
 {
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
     snode->layout = VK_NULL_HANDLE;
@@ -117,7 +114,8 @@ static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
     snode->layout = VK_NULL_HANDLE;
 }
 
-static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node, void *key)
+static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node,
+                                         const void *key)
 {
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
     return memcmp(&snode->key, key, sizeof(PipelineKey));
@@ -746,15 +744,15 @@ static void create_pipeline(PGRAPHState *pg)
         (VkPipelineShaderStageCreateInfo){
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = r->shader_binding->vertex->module,
+            .module = r->shader_binding->vsh.module_info->module,
             .pName = "main",
         };
-    if (r->shader_binding->geometry) {
+    if (r->shader_binding->geom.module_info) {
         shader_stages[num_active_shader_stages++] =
             (VkPipelineShaderStageCreateInfo){
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage = VK_SHADER_STAGE_GEOMETRY_BIT,
-                .module = r->shader_binding->geometry->module,
+                .module = r->shader_binding->geom.module_info->module,
                 .pName = "main",
             };
     }
@@ -762,7 +760,7 @@ static void create_pipeline(PGRAPHState *pg)
         (VkPipelineShaderStageCreateInfo){
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = r->shader_binding->fragment->module,
+            .module = r->shader_binding->psh.module_info->module,
             .pName = "main",
         };
 
@@ -789,27 +787,6 @@ static void create_pipeline(PGRAPHState *pg)
     };
 
     void *rasterizer_next_struct = NULL;
-
-    VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_state;
-
-    if (r->provoking_vertex_extension_enabled) {
-        VkProvokingVertexModeEXT provoking_mode =
-            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
-                     NV_PGRAPH_CONTROL_3_SHADEMODE) ==
-                    NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT ?
-                VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT :
-                VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
-
-        provoking_state =
-            (VkPipelineRasterizationProvokingVertexStateCreateInfoEXT){
-                .sType =
-                    VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT,
-                .provokingVertexMode = provoking_mode,
-            };
-        rasterizer_next_struct = &provoking_state;
-    } else {
-        // FIXME: Handle in shader?
-    }
 
     VkPipelineRasterizationStateCreateInfo rasterizer = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -965,27 +942,6 @@ static void create_pipeline(PGRAPHState *pg)
         .dynamicStateCount = num_dynamic_states,
         .pDynamicStates = dynamic_states,
     };
-
-    // /* Polygon offset */
-    // /* FIXME: GL implementation-specific, maybe do this in VS? */
-    // if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
-    //         NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE)
-    // if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
-    //         NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE)
-    // if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
-    //         NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE)
-    if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
-        (NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE |
-         NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE |
-         NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE)) {
-        uint32_t zfactor_u32 = pgraph_reg_r(pg, NV_PGRAPH_ZOFFSETFACTOR);
-        float zfactor = *(float *)&zfactor_u32;
-        uint32_t zbias_u32 = pgraph_reg_r(pg, NV_PGRAPH_ZOFFSETBIAS);
-        float zbias = *(float *)&zbias_u32;
-        rasterizer.depthBiasEnable = VK_TRUE;
-        rasterizer.depthBiasSlopeFactor = zfactor;
-        rasterizer.depthBiasConstantFactor = zbias;
-    }
 
     // FIXME: Dither
     // if (pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0) &

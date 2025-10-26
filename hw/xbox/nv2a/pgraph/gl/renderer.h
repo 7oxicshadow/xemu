@@ -73,6 +73,7 @@ typedef struct TextureBinding {
     unsigned int scale;
     unsigned int min_filter;
     unsigned int mag_filter;
+    uint32_t lod_bias;
     unsigned int addru;
     unsigned int addrv;
     unsigned int addrp;
@@ -81,6 +82,30 @@ typedef struct TextureBinding {
     GLenum gl_target;
     GLuint gl_texture;
 } TextureBinding;
+
+typedef struct ShaderModuleCacheKey {
+    GLenum kind;
+    union {
+        struct {
+            VshState state;
+            GenVshGlslOptions glsl_opts;
+        } vsh;
+        struct {
+            GeomState state;
+            GenGeomGlslOptions glsl_opts;
+        } geom;
+        struct {
+            PshState state;
+            GenPshGlslOptions glsl_opts;
+        } psh;
+    };
+} ShaderModuleCacheKey;
+
+typedef struct ShaderModuleCacheEntry {
+    LruNode node;
+    ShaderModuleCacheKey key;
+    GLuint gl_shader;
+} ShaderModuleCacheEntry;
 
 typedef struct ShaderBinding {
     LruNode node;
@@ -175,6 +200,9 @@ typedef struct PGRAPHGLState {
     QemuMutex shader_cache_lock;
     QemuThread shader_disk_thread;
 
+    Lru shader_module_cache;
+    ShaderModuleCacheEntry *shader_module_cache_entries;
+
     unsigned int zpass_pixel_count_result;
     unsigned int gl_zpass_pixel_count_query_count;
     GLuint *gl_zpass_pixel_count_queries;
@@ -206,6 +234,10 @@ typedef struct PGRAPHGLState {
 
     GLfloat supported_aliased_line_width_range[2];
     GLfloat supported_smooth_line_width_range[2];
+
+    struct supported_extensions {
+        GLboolean texture_filter_anisotropic;
+    } supported_extensions;
 } PGRAPHGLState;
 
 extern GloContext *g_nv2a_context_render;
@@ -259,5 +291,7 @@ void pgraph_gl_shader_write_cache_reload_list(PGRAPHState *pg);
 void pgraph_gl_set_surface_scale_factor(NV2AState *d, unsigned int scale);
 unsigned int pgraph_gl_get_surface_scale_factor(NV2AState *d);
 int pgraph_gl_get_framebuffer_surface(NV2AState *d);
+void pgraph_gl_determine_gpu_properties(NV2AState *d);
+GPUProperties *pgraph_gl_get_gpu_properties(void);
 
 #endif

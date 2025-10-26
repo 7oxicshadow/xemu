@@ -22,7 +22,6 @@
 #include "qemu/osdep.h"
 #include "qemu/fast-hash.h"
 #include "qemu/mstring.h"
-#include <locale.h>
 
 #include "xemu-version.h"
 #include "ui/xemu-settings.h"
@@ -32,10 +31,6 @@
 
 static GLenum get_gl_primitive_mode(enum ShaderPolygonMode polygon_mode, enum ShaderPrimitiveMode primitive_mode)
 {
-    if (polygon_mode == POLY_MODE_POINT) {
-        return GL_POINTS;
-    }
-
     switch (primitive_mode) {
     case PRIM_TYPE_POINTS: return GL_POINTS;
     case PRIM_TYPE_LINES: return GL_LINES;
@@ -132,55 +127,95 @@ static void update_shader_uniform_locs(ShaderBinding *binding)
     }
 }
 
-static void generate_shaders(ShaderBinding *binding)
+static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
+                                           const void *key)
 {
-    char *previous_numeric_locale = setlocale(LC_NUMERIC, NULL);
-    if (previous_numeric_locale) {
-        previous_numeric_locale = g_strdup(previous_numeric_locale);
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    memcpy(&module->key, key, sizeof(ShaderModuleCacheKey));
+
+    const char *kind_str;
+    MString *code;
+
+    switch (module->key.kind) {
+    case GL_VERTEX_SHADER:
+        kind_str = "vertex shader";
+        code = pgraph_glsl_gen_vsh(&module->key.vsh.state,
+                                   module->key.vsh.glsl_opts);
+        break;
+    case GL_GEOMETRY_SHADER:
+        kind_str = "geometry shader";
+        code = pgraph_glsl_gen_geom(&module->key.geom.state,
+                                    module->key.geom.glsl_opts);
+        break;
+    case GL_FRAGMENT_SHADER:
+        kind_str = "fragment shader";
+        code = pgraph_glsl_gen_psh(&module->key.psh.state,
+                                   module->key.psh.glsl_opts);
+        break;
+    default:
+        assert(!"Invalid shader module kind");
+        kind_str = "unknown";
+        code = NULL;
     }
 
-    /* Ensure numeric values are printed with '.' radix, no grouping */
-    setlocale(LC_NUMERIC, "C");
+    module->gl_shader =
+        create_gl_shader(module->key.kind, mstring_get_str(code), kind_str);
+    mstring_unref(code);
+}
+
+static void shader_module_cache_entry_post_evict(Lru *lru, LruNode *node)
+{
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    glDeleteShader(module->gl_shader);
+}
+
+static bool shader_module_cache_entry_compare(Lru *lru, LruNode *node,
+                                              const void *key)
+{
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    return memcmp(&module->key, key, sizeof(ShaderModuleCacheKey));
+}
+
+static GLuint get_shader_module_for_key(PGRAPHGLState *r,
+                                        const ShaderModuleCacheKey *key)
+{
+    uint64_t hash = fast_hash((void *)key, sizeof(ShaderModuleCacheKey));
+    LruNode *node = lru_lookup(&r->shader_module_cache, hash, key);
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    return module->gl_shader;
+}
+
+static void generate_shaders(PGRAPHGLState *r, ShaderBinding *binding)
+{
     GLuint program = glCreateProgram();
 
     ShaderState *state = &binding->state;
+    ShaderModuleCacheKey key;
 
-    /* Create an optional geometry shader and find primitive type */
-    GLenum gl_primitive_mode = get_gl_primitive_mode(
-        state->geom.polygon_front_mode, state->geom.primitive_mode);
-    MString *geometry_shader_code =
-        pgraph_glsl_gen_geom(&state->geom, (GenGeomGlslOptions){ 0 });
-    if (geometry_shader_code) {
-        const char* geometry_shader_code_str =
-             mstring_get_str(geometry_shader_code);
-        GLuint geometry_shader = create_gl_shader(GL_GEOMETRY_SHADER,
-                                                  geometry_shader_code_str,
-                                                  "geometry shader");
-        glAttachShader(program, geometry_shader);
-        mstring_unref(geometry_shader_code);
+    bool need_geometry_shader = pgraph_glsl_need_geom(&state->geom);
+    if (need_geometry_shader) {
+        memset(&key, 0, sizeof(key));
+        key.kind = GL_GEOMETRY_SHADER;
+        key.geom.state = state->geom;
+        glAttachShader(program, get_shader_module_for_key(r, &key));
     }
 
     /* create the vertex shader */
-    MString *vertex_shader_code = pgraph_glsl_gen_vsh(
-        &state->vsh, (GenVshGlslOptions){
-                         .prefix_outputs = geometry_shader_code != NULL,
-                     });
-    GLuint vertex_shader = create_gl_shader(GL_VERTEX_SHADER,
-                                            mstring_get_str(vertex_shader_code),
-                                            "vertex shader");
-    glAttachShader(program, vertex_shader);
-    mstring_unref(vertex_shader_code);
+    memset(&key, 0, sizeof(key));
+    key.kind = GL_VERTEX_SHADER;
+    key.vsh.state = state->vsh;
+    key.vsh.glsl_opts.prefix_outputs = need_geometry_shader;
+    glAttachShader(program, get_shader_module_for_key(r, &key));
 
     /* generate a fragment shader from register combiners */
-    MString *fragment_shader_code =
-        pgraph_glsl_gen_psh(&state->psh, (GenPshGlslOptions){ 0 });
-    const char *fragment_shader_code_str =
-        mstring_get_str(fragment_shader_code);
-    GLuint fragment_shader = create_gl_shader(GL_FRAGMENT_SHADER,
-                                              fragment_shader_code_str,
-                                              "fragment shader");
-    glAttachShader(program, fragment_shader);
-    mstring_unref(fragment_shader_code);
+    memset(&key, 0, sizeof(key));
+    key.kind = GL_FRAGMENT_SHADER;
+    key.psh.state = state->psh;
+    glAttachShader(program, get_shader_module_for_key(r, &key));
 
     /* link the program */
     glLinkProgram(program);
@@ -196,7 +231,8 @@ static void generate_shaders(ShaderBinding *binding)
     glUseProgram(program);
 
     binding->gl_program = program;
-    binding->gl_primitive_mode = gl_primitive_mode;
+    binding->gl_primitive_mode = get_gl_primitive_mode(
+        state->geom.polygon_front_mode, state->geom.primitive_mode);
     binding->initialized = true;
 
     set_texture_sampler_uniforms(binding);
@@ -213,11 +249,6 @@ static void generate_shaders(ShaderBinding *binding)
     }
 
     update_shader_uniform_locs(binding);
-
-    if (previous_numeric_locale) {
-        setlocale(LC_NUMERIC, previous_numeric_locale);
-        g_free(previous_numeric_locale);
-    }
 }
 
 static const char *shader_gl_vendor = NULL;
@@ -457,7 +488,7 @@ static void *shader_reload_lru_from_disk(void *arg)
     return NULL;
 }
 
-static void shader_cache_entry_init(Lru *lru, LruNode *node, void *state)
+static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 {
     ShaderBinding *binding = container_of(node, ShaderBinding, node);
     memcpy(&binding->state, state, sizeof(ShaderState));
@@ -487,7 +518,7 @@ static void shader_cache_entry_post_evict(Lru *lru, LruNode *node)
     memset(&binding->state, 0, sizeof(ShaderState));
 }
 
-static bool shader_cache_entry_compare(Lru *lru, LruNode *node, void *key)
+static bool shader_cache_entry_compare(Lru *lru, LruNode *node, const void *key)
 {
     ShaderBinding *binding = container_of(node, ShaderBinding, node);
     return memcmp(&binding->state, key, sizeof(ShaderState));
@@ -521,6 +552,20 @@ void pgraph_gl_init_shaders(PGRAPHState *pg)
 
     qemu_thread_create(&r->shader_disk_thread, "pgraph.renderer_state->shader_cache",
                        shader_reload_lru_from_disk, pg, QEMU_THREAD_JOINABLE);
+
+    /* FIXME: Make this configurable */
+    const size_t shader_module_cache_size = 50*1024;
+    lru_init(&r->shader_module_cache);
+    r->shader_module_cache_entries =
+        g_malloc_n(shader_module_cache_size, sizeof(ShaderModuleCacheEntry));
+    assert(r->shader_module_cache_entries != NULL);
+    for (int i = 0; i < shader_module_cache_size; i++) {
+        lru_add_free(&r->shader_module_cache, &r->shader_module_cache_entries[i].node);
+    }
+
+    r->shader_module_cache.init_node = shader_module_cache_entry_init;
+    r->shader_module_cache.compare_nodes = shader_module_cache_entry_compare;
+    r->shader_module_cache.post_node_evict = shader_module_cache_entry_post_evict;
 }
 
 void pgraph_gl_finalize_shaders(PGRAPHState *pg)
@@ -531,6 +576,10 @@ void pgraph_gl_finalize_shaders(PGRAPHState *pg)
     pgraph_gl_shader_write_cache_reload_list(pg); // FIXME: also flushes, rename for clarity
     free(r->shader_cache_entries);
     r->shader_cache_entries = NULL;
+
+    lru_flush(&r->shader_module_cache);
+    g_free(r->shader_module_cache_entries);
+    r->shader_module_cache_entries = NULL;
 
     qemu_mutex_destroy(&r->shader_cache_lock);
 }
@@ -652,6 +701,9 @@ static void apply_uniform_updates(const UniformInfo *info, int *locs,
         case UniformElementType_int:
             glUniform1iv(locs[i], info[i].count, value);
             break;
+        case UniformElementType_ivec2:
+            glUniform2iv(locs[i], info[i].count, value);
+            break;
         case UniformElementType_ivec4:
             glUniform4iv(locs[i], info[i].count, value);
             break;
@@ -730,7 +782,7 @@ void pgraph_gl_bind_shaders(PGRAPHState *pg)
 
     if (!binding->initialized && !pgraph_gl_shader_load_from_memory(binding)) {
         nv2a_profile_inc_counter(NV2A_PROF_SHADER_GEN);
-        generate_shaders(binding);
+        generate_shaders(r, binding);
         if (g_config.perf.cache_shaders) {
             pgraph_gl_shader_cache_to_disk(binding);
         }

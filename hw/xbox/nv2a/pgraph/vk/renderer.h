@@ -146,6 +146,7 @@ typedef struct SurfaceBinding {
 } SurfaceBinding;
 
 typedef struct ShaderModuleInfo {
+    int refcnt;
     char *glsl;
     GByteArray *spirv;
     VkShaderModule module;
@@ -155,19 +156,44 @@ typedef struct ShaderModuleInfo {
     ShaderUniformLayout push_constants;
 } ShaderModuleInfo;
 
+typedef struct ShaderModuleCacheKey {
+    VkShaderStageFlagBits kind;
+    union {
+        struct {
+            VshState state;
+            GenVshGlslOptions glsl_opts;
+        } vsh;
+        struct {
+            GeomState state;
+            GenGeomGlslOptions glsl_opts;
+        } geom;
+        struct {
+            PshState state;
+            GenPshGlslOptions glsl_opts;
+        } psh;
+    };
+} ShaderModuleCacheKey;
+
+typedef struct ShaderModuleCacheEntry {
+    LruNode node;
+    ShaderModuleCacheKey key;
+    ShaderModuleInfo *module_info;
+} ShaderModuleCacheEntry;
+
 typedef struct ShaderBinding {
     LruNode node;
-    bool initialized;
-
     ShaderState state;
-    ShaderModuleInfo *geometry;
-    ShaderModuleInfo *vertex;
-    ShaderModuleInfo *fragment;
-
     struct {
-        PshUniformLocs psh;
-        VshUniformLocs vsh;
-    } uniform_locs;
+        ShaderModuleInfo *module_info;
+        VshUniformLocs uniform_locs;
+    } vsh;
+    struct {
+        ShaderModuleInfo *module_info;
+    } geom;
+    struct {
+        ShaderModuleInfo *module_info;
+        PshUniformLocs uniform_locs;
+    } psh;
 } ShaderBinding;
 
 typedef struct TextureKey {
@@ -180,6 +206,7 @@ typedef struct TextureKey {
     uint32_t filter;
     uint32_t address;
     uint32_t border_color;
+    uint32_t max_anisotropy;
 } TextureKey;
 
 typedef struct TextureBinding {
@@ -299,7 +326,6 @@ typedef struct PGRAPHVkState {
 
     bool debug_utils_extension_enabled;
     bool custom_border_color_extension_enabled;
-    bool provoking_vertex_extension_enabled;
     bool memory_budget_extension_enabled;
 
     VkPhysicalDevice physical_device;
@@ -380,6 +406,9 @@ typedef struct PGRAPHVkState {
     bool shader_bindings_changed;
     bool use_push_constants_for_uniform_attrs;
 
+    Lru shader_module_cache;
+    ShaderModuleCacheEntry *shader_module_cache_entries;
+
     // FIXME: Merge these into a structure
     uint64_t uniform_buffer_hashes[2];
     size_t uniform_buffer_offsets[2];
@@ -435,6 +464,8 @@ VkShaderModule pgraph_vk_create_shader_module_from_spv(PGRAPHVkState *r,
                                                        GByteArray *spv);
 ShaderModuleInfo *pgraph_vk_create_shader_module_from_glsl(
     PGRAPHVkState *r, VkShaderStageFlagBits stage, const char *glsl);
+void pgraph_vk_ref_shader_module(ShaderModuleInfo *info);
+void pgraph_vk_unref_shader_module(PGRAPHVkState *r, ShaderModuleInfo *info);
 void pgraph_vk_destroy_shader_module(PGRAPHVkState *r, ShaderModuleInfo *info);
 
 // buffer.c
@@ -562,5 +593,9 @@ void pgraph_vk_end_nondraw_commands(PGRAPHState *pg, VkCommandBuffer cmd);
 
 // blit.c
 void pgraph_vk_image_blit(NV2AState *d);
+
+// gpuprops.c
+void pgraph_vk_determine_gpu_properties(NV2AState *d);
+GPUProperties *pgraph_vk_get_gpu_properties(void);
 
 #endif

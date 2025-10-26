@@ -1,7 +1,7 @@
 /*
  * Geforce NV2A PGRAPH Vulkan Renderer
  *
- * Copyright (c) 2024 Matt Borgerson
+ * Copyright (c) 2024-2025 Matt Borgerson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -401,10 +401,6 @@ static void add_optional_device_extension_names(
         add_extension_if_available(available_extensions, enabled_extension_names,
                                    VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
 
-    r->provoking_vertex_extension_enabled =
-        add_extension_if_available(available_extensions, enabled_extension_names,
-                                   VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
-
     r->memory_budget_extension_enabled = add_extension_if_available(
         available_extensions, enabled_extension_names,
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
@@ -540,12 +536,13 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
             .enabled = &r->enabled_physical_device_features.n, \
             .required = req, \
         }
-        F(shaderClipDistance, true),
-        F(geometryShader, true),
-        F(shaderTessellationAndGeometryPointSize, true),
         F(depthClamp, true),
-        F(occlusionQueryPrecise, true),
         F(fillModeNonSolid, true),
+        F(geometryShader, true),
+        F(occlusionQueryPrecise, true),
+        F(samplerAnisotropy, false),
+        F(shaderClipDistance, true),
+        F(shaderTessellationAndGeometryPointSize, true),
         F(wideLines, false),
         #undef F
         // clang-format on
@@ -569,17 +566,6 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
     }
 
     void *next_struct = NULL;
-
-    VkPhysicalDeviceProvokingVertexFeaturesEXT provoking_vertex_features;
-    if (r->provoking_vertex_extension_enabled) {
-        provoking_vertex_features = (VkPhysicalDeviceProvokingVertexFeaturesEXT){
-            .sType =
-                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT,
-            .provokingVertexLast = VK_TRUE,
-            .pNext = next_struct,
-        };
-        next_struct = &provoking_vertex_features;
-    }
 
     VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_features;
     if (r->custom_border_color_extension_enabled) {

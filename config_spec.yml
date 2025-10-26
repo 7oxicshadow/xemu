@@ -7,6 +7,7 @@ general:
       type: bool
       default: true
   screenshot_dir: string
+  games_dir: string
   skip_boot_anim: bool
   # throttle_io: bool
   last_viewed_menu_index: integer
@@ -309,6 +310,9 @@ display:
       advanced_tree_state:
         type: bool
         default: false
+  setup_nvidia_profile:
+    type: bool
+    default: true
 
 audio:
   vp:

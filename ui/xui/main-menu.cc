@@ -71,6 +71,7 @@ void MainMenuGeneralView::Draw()
            "Skip the full Xbox boot animation sequence");
     FilePicker("Screenshot output directory", &g_config.general.screenshot_dir,
                NULL, true);
+    FilePicker("Games directory", &g_config.general.games_dir, NULL, true);
     // toggle("Throttle DVD/HDD speeds", &g_config.general.throttle_io,
     //        "Limit DVD/HDD throughput to approximate Xbox load times");
 }
@@ -172,7 +173,14 @@ void MainMenuInputView::Draw()
         driver = DRIVER_DUKE_DISPLAY_NAME;
     else if (strcmp(driver, DRIVER_S) == 0)
         driver = DRIVER_S_DISPLAY_NAME;
-    
+
+    ImGui::Columns(2, "", false);
+    ImGui::SetColumnWidth(0, ImGui::GetWindowWidth()*0.25);
+
+    ImGui::Text("Emulated Device");
+    ImGui::SameLine(0, 0);
+    ImGui::NextColumn();
+
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::BeginCombo("###InputDrivers", driver,
                           ImGuiComboFlags_NoArrowButton)) {
@@ -204,9 +212,15 @@ void MainMenuInputView::Draw()
     }
     DrawComboChevron();
 
+    ImGui::NextColumn();
+
     //
     // Render input device combo
     //
+
+    ImGui::Text("Input Device");
+    ImGui::SameLine(0, 0);
+    ImGui::NextColumn();
 
     // List available input devices
     const char *not_connected = "Not Connected";
