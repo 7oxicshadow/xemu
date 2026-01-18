@@ -29,6 +29,7 @@
 #include "qemu/cutils.h"
 #include "qemu/log.h"
 #include "sysemu/sysemu.h"
+#include "ui/xemu-settings.h"
 
 bool hmp_handle_error(Monitor *mon, Error *err)
 {
@@ -434,3 +435,17 @@ void hmp_dumpdtb(Monitor *mon, const QDict *qdict)
     monitor_printf(mon, "dtb dumped to %s", filename);
 }
 #endif
+
+void hmp_showfps(Monitor *mon, const QDict *qdict)
+{
+    int value = qdict_get_try_int(qdict, "value", 0);
+
+    //if we did not get a value of 1 it was either out of range or 0
+    //assume 0 in all cases.
+    if ( value != 1 ) {
+        value = 0;
+    }
+
+    g_config.display.ui.ui_show_fps_bool = value;
+    xemu_settings_save();
+}

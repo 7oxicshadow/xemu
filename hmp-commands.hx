@@ -1767,6 +1767,13 @@ ERST
         .cmd        = hmp_calc_dirty_rate,
     },
 
+SRST
+``calc_dirty_rate`` *second*
+  Start a round of dirty rate measurement with the period specified in *second*.
+  The result of the dirty rate measurement may be observed with ``info
+  dirty_rate`` command.
+ERST
+
     {
         .name       = "showfps",
         .args_type  = "value:i",
@@ -1780,27 +1787,6 @@ SRST
   A value of 0 will disable the basic FPS monitor.
   A value of 1 will enable the basic FPS monitor
 
-ERST
-
-    {
-        .name       = "customratio",
-        .args_type  = "string:s",
-        .params     = "string",
-        .help       = "Set the custom ratio value",
-        .cmd        = hmp_customratio,
-    },
-
-SRST
-``customratio`` *string*
-  Float value between 0.0 and 1.0 for the desired ratio
-
-ERST
-
-SRST
-``calc_dirty_rate`` *second*
-  Start a round of dirty rate measurement with the period specified in *second*.
-  The result of the dirty rate measurement may be observed with ``info
-  dirty_rate`` command.
 ERST
 
     {
