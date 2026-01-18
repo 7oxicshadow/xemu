@@ -221,6 +221,11 @@ void xemu_hud_render(void)
     ImGui::NewFrame();
     ProcessKeyboardShortcuts();
 
+    if(g_config.display.ui.ui_show_fps_bool) {
+        // Draw the FPS before the menu
+        FPSManager_window.Draw();
+    }
+
 #if defined(CONFIG_RENDERDOC)
     if (g_capture_renderdoc_frame) {
         nv2a_dbg_renderdoc_capture_frames(1, false);

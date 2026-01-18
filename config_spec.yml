@@ -281,6 +281,9 @@ display:
     scale:
       type: integer
       default: 1
+    ui_show_fps_bool:
+      type: integer
+      default: 0
     auto_scale:
       type: bool
       default: true
