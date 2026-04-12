@@ -29,7 +29,6 @@
 #include "qemu/cutils.h"
 #include "qemu/log.h"
 #include "system/system.h"
-#include "sysemu/sysemu.h"
 #include "ui/xemu-settings.h"
 
 bool hmp_handle_error(Monitor *mon, Error *err)
